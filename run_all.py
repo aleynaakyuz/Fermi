@@ -39,7 +39,7 @@ RESULTDIR = "site/all/results"
 FIGDIR_ALL = "site/all/figures"
 
 OFFICIAL_C = "#2f6fd0"      # official Fermi map
-T90_C = "#e8913a"           # my localization, full T90 window
+T90_C = "#b8690a"           # my localization, full T90 window
 PEAK_C = "#d9534f"          # my localization, best-S/N window
 EXT_C = "#1f9e6e"           # another mission's position
 SHORT_LONG_CUT = 2.0

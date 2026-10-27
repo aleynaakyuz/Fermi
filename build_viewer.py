@@ -19,7 +19,7 @@ LCSRC = "site/vec/lc"
 OUT = "site/viewer.html"
 
 OFFICIAL_C = "#2f6fd0"
-T90_C = "#e8913a"
+T90_C = "#b8690a"
 PEAK_C = "#d9534f"
 EXT_C = "#1f9e6e"
 
@@ -88,7 +88,7 @@ def main():
     :root:not([data-theme="light"]) {{
       --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
       --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
-      --accent:#6fa3ea; --t90:#f0a85f; --peak:#ef8079; --ext:#4cc79a;
+      --accent:#6fa3ea; --t90:#ffd166; --peak:#ef8079; --ext:#4cc79a;
       --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
     }}
@@ -96,7 +96,7 @@ def main():
   :root[data-theme="dark"] {{
     --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
     --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
-    --accent:#6fa3ea; --t90:#f0a85f; --peak:#ef8079; --ext:#4cc79a;
+    --accent:#6fa3ea; --t90:#ffd166; --peak:#ef8079; --ext:#4cc79a;
     --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
   }}
@@ -169,9 +169,11 @@ def main():
   svg.lc {{ width:100%; height:auto; display:block; }}
   svg.lc text {{ font-family:var(--sans); fill:var(--muted); }}
   .band {{ width:18px; height:11px; border-radius:2px; }}
-  .band.t90b {{ background:var(--t90); opacity:.26; outline:1px dashed var(--t90); }}
-  .band.snb {{ background:var(--t90); opacity:.6; }}
-  .band.bgb {{ background:var(--accent); opacity:.22; }}
+  /* Drawn with solid colour and a border rather than a faint tint: a 0.2
+     alpha wash over the dark surface reads as mud. */
+  .band.t90b {{ background:transparent; border:1.5px dashed var(--t90); }}
+  .band.snb {{ background:var(--t90); }}
+  .band.bgb {{ background:var(--accent); opacity:.45; }}
 
   /* ---------------------------------------------------------- facts */
   .facts {{ background:var(--surface); border:1px solid var(--rule);
@@ -554,18 +556,20 @@ def main():
     function band(a, b, color, opacity, dashed) {{
       var xa = px(Math.max(a, x0)), xb = px(Math.min(b, x1));
       if (xb <= xa) return;
+      // The outline is drawn at full strength rather than as a faint tint:
+      // a low-alpha wash is legible on white and turns to mud on dark.
       out.push('<rect x="' + xa.toFixed(1) + '" y="' + M.t + '" width="' +
         (xb - xa).toFixed(1) + '" height="' + ih + '" fill="' + color +
-        '" opacity="' + opacity + '"' +
-        (dashed ? ' stroke="' + color + '" stroke-dasharray="4,3" stroke-opacity=".9"' : '') +
-        ' />');
+        '" fill-opacity="' + opacity + '"' +
+        (dashed ? ' stroke="' + color + '" stroke-width="1.4" stroke-dasharray="5,3"'
+                : '') + ' />');
     }}
 
     // Background windows first, then the full T90 span outlined, then the
     // window actually used filled -- so what was discarded stays visible.
-    (L.wbg || []).forEach(function (w) {{ band(w[0], w[1], COL.off, 0.13); }});
-    band(L.w90[0], L.w90[1], COL.t90, 0.14, true);
-    band(L.wsn[0], L.wsn[1], COL.t90, 0.42);
+    (L.wbg || []).forEach(function (w) {{ band(w[0], w[1], COL.off, 0.16); }});
+    band(L.w90[0], L.w90[1], COL.t90, 0.10, true);
+    band(L.wsn[0], L.wsn[1], COL.t90, 0.34);
 
     out.push('<rect class="frame" x="' + M.l + '" y="' + M.t +
              '" width="' + iw + '" height="' + ih + '" />');

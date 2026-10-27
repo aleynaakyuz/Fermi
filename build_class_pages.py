@@ -31,7 +31,7 @@ FIGDIR_ALL = "site/all/figures"
 SITEDIR = "site"
 
 OFFICIAL_C = "#2f6fd0"
-T90_C = "#e8913a"
+T90_C = "#b8690a"
 PEAK_C = "#d9534f"
 EXT_C = "#1f9e6e"
 GOOD = "#2e7d55"
