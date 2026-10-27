@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fermi GBM Localization Study</title>
+</head>
+<body>
+
+<style>
+  :root {
+    --paper:#f5f7fa; --surface:#ffffff; --surface-2:#eef1f6;
+    --ink:#141b26; --ink-soft:#46525f; --muted:#6b7686; --rule:#d8dee8;
+    --accent:#2f6fd0;
+    --shadow:0 1px 2px rgba(20,27,38,.06), 0 6px 18px rgba(20,27,38,.05);
+    --serif: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
+      --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
+      --accent:#6fa3ea;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
+    --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
+    --accent:#6fa3ea;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
+  }
+  *,*::before,*::after { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:900px; margin:0 auto;
+    padding:clamp(2rem,6vw,4rem) clamp(1rem,4vw,1.6rem) 4rem;
+    display:flex; flex-direction:column; gap:2.4rem; }
+  .eyebrow { font-family:var(--mono); font-size:.72rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted); margin:0; }
+  h1 { font-family:var(--serif); font-weight:600; margin:.5rem 0 0;
+    font-size:clamp(1.8rem,4.5vw,2.6rem); line-height:1.12;
+    letter-spacing:-.012em; text-wrap:balance; }
+  .standfirst { font-family:var(--serif); color:var(--ink-soft); max-width:62ch;
+    font-size:clamp(1rem,2vw,1.14rem); margin:.9rem 0 0; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:1rem; }
+  .card { display:flex; flex-direction:column; gap:.5rem;
+    background:var(--surface); border:1px solid var(--rule);
+    border-radius:12px; padding:1.2rem 1.3rem; text-decoration:none;
+    color:inherit; box-shadow:var(--shadow); }
+  .card:hover { border-color:var(--accent); }
+  .card:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+  .card h2 { margin:0; font-family:var(--serif); font-size:1.18rem; font-weight:600; }
+  .card p { margin:0; font-size:.88rem; color:var(--ink-soft); }
+  .go { font-size:.82rem; color:var(--accent); font-weight:600; margin-top:auto; }
+  section h3 { font-family:var(--sans); font-size:.8rem; font-weight:650;
+    letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+    margin:0 0 .6rem; }
+  p.body { max-width:68ch; margin:0 0 .9rem; color:var(--ink-soft); font-size:.94rem; }
+  code { font-family:var(--mono); font-size:.88em; }
+  footer { border-top:1px solid var(--rule); padding-top:1.3rem;
+    color:var(--muted); font-size:.83rem; }
+  a { color:var(--accent); }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Fermi GBM &middot; gamma-ray burst localization</p>
+    <h1>Reproducing Fermi GBM's gamma-ray burst positions</h1>
+    <p class="standfirst">
+      Every GBM burst with an official sky map, localized from scratch with the
+      legacy Daughter-of-Locburst grid search and compared against the position
+      Fermi published &mdash; and, where another observatory caught the same
+      burst, against a position accurate to arcseconds.
+    </p>
+  </header>
+
+  <div class="cards">
+      <a class="card" href="viewer.html">
+        <h2>Burst viewer</h2>
+        <p>Pick a class and a GRB to see its official Fermi region, both reproduction windows, and any external mission position. All 2,049 bursts.</p>
+        <span class="go">Open &rarr;</span>
+      </a>
+      <a class="card" href="long.html">
+        <h2>Long GRBs</h2>
+        <p>All 1,695 long bursts: summary statistics, the effect of the source window, and a sortable table of every burst.</p>
+        <span class="go">Open &rarr;</span>
+      </a>
+      <a class="card" href="short.html">
+        <h2>Short GRBs</h2>
+        <p>All 354 short bursts, including whether trimming the source window helps them as it does long bursts.</p>
+        <span class="go">Open &rarr;</span>
+      </a>
+      <a class="card" href="external.html">
+        <h2>Cross-mission localizations</h2>
+        <p>The 969 GBM bursts carrying a position from Swift, the Fermi LAT, or another instrument.</p>
+        <span class="go">Open &rarr;</span>
+      </a>
+      <a class="card" href="replication.html">
+        <h2>DoL replication report</h2>
+        <p>The original ten-burst study: can the legacy grid search reproduce GBM&#x27;s own positions, and what closes the gap.</p>
+        <span class="go">Open &rarr;</span>
+      </a>
+  </div>
+
+  <section>
+    <h3>What this is</h3>
+    <p class="body">
+      The Fermi Gamma-ray Burst Monitor locates a burst by comparing counts
+      across its twelve NaI detectors, whose responses point in different
+      directions. This project re-runs that calculation independently on
+      archival data for 2,049 bursts, twice each: once using the catalog's full
+      T90 interval as the source window, and once using only the brightest
+      sub-interval, the way a human Burst Advocate would.
+    </p>
+    <p class="body">
+      Measured against the 284 bursts with an independent arcsecond position,
+      the reproduction is as accurate as the official pipeline &mdash; closer
+      to the truth on 48% of them, which is a coin flip. Separation from the
+      official map turns out to measure agreement with Fermi, not accuracy.
+    </p>
+  </section>
+
+  <section>
+    <h3>Reproducing it</h3>
+    <p class="body">
+      The scripts are in the repository root. <code>fetch_catalog.py</code>
+      pulls the burst catalog from HEASARC, <code>download_gbm.py</code>
+      retrieves trigger data and official sky maps (5.2&nbsp;GB, not in this
+      repository), <code>run_all.py</code> and <code>extract_contours.py</code>
+      do the localization, and the <code>build_*.py</code> scripts render these
+      pages. Everything reads public NASA archival data.
+    </p>
+  </section>
+
+  <footer>
+    Built from the Fermi GBM burst catalog, Fermi LAT and Swift catalogs at
+    HEASARC. Localization by <code>legacy_DoL</code> from
+    <code>astro-gdt-fermi</code>.
+  </footer>
+</div>
+
+</body>
+</html>

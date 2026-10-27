@@ -1,0 +1,30 @@
+# Archival data from HEASARC: 5.2 GB, and freely re-downloadable with
+# download_gbm.py. Never commit this.
+data/
+
+# Generated analysis products. All reproducible from the scripts, and far too
+# bulky or numerous for a repository.
+site/all/figures/
+site/all/results/
+site/vec/
+site/figures/
+catalog/_xmatch_cache/
+catalog/download_log.jsonl
+
+# Intermediate run artefacts
+site/*.json
+site/*.log
+site/all/*.json
+*.part
+
+# The published pages live in docs/ (wrapped for GitHub Pages by
+# publish_github.py); site/ is the working output directory.
+site/*.html
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Local tool configuration, not project content
+.claude/
+catalog/download_run.log
