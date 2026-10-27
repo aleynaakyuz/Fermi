@@ -104,7 +104,7 @@ def main():
   body {{ margin:0; background:var(--paper); color:var(--ink);
     font-family:var(--sans); font-size:16px; line-height:1.6;
     -webkit-font-smoothing:antialiased; }}
-  .wrap {{ max-width:1080px; margin:0 auto;
+  .wrap {{ max-width:1200px; margin:0 auto;
     padding:clamp(1.4rem,4vw,2.8rem) clamp(.8rem,3vw,1.6rem) 4rem;
     display:flex; flex-direction:column; gap:2rem; }}
   code {{ font-family:var(--mono); font-size:.9em; }}
@@ -141,9 +141,12 @@ def main():
   .pickcount {{ font-size:.8rem; color:var(--muted); margin-left:auto; }}
 
   /* ----------------------------------------------------------- plot */
-  .stage {{ display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
-    gap:1.4rem; align-items:start; }}
-  @media (max-width:820px) {{ .stage {{ grid-template-columns:1fr; }} }}
+  .stage {{ display:flex; flex-direction:column; gap:1.2rem; }}
+  /* Plots get the full page width and sit side by side; the sky region is
+     roughly square and the lightcurve wants length, so the split is uneven. */
+  .plots {{ display:grid; grid-template-columns:minmax(0,1.12fr) minmax(0,1.3fr);
+    gap:1.3rem; align-items:start; }}
+  @media (max-width:860px) {{ .plots {{ grid-template-columns:1fr; }} }}
   .plotbox {{ background:var(--surface); border:1px solid var(--rule);
     border-radius:12px; padding:1rem; box-shadow:var(--shadow); }}
   svg.sky {{ width:100%; height:auto; display:block; }}
@@ -159,7 +162,10 @@ def main():
   .sw.t90 {{ border-color:var(--t90); border-top-style:dashed; }}
   .sw.pk  {{ border-color:var(--peak); }}
   .star {{ color:var(--ext); font-size:1rem; line-height:1; }}
-  .lcwrap {{ margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--rule); }}
+  .lcwrap {{ display:flex; flex-direction:column; }}
+  @media (max-width:860px) {{
+    .lcwrap {{ margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--rule); }}
+  }}
   svg.lc {{ width:100%; height:auto; display:block; }}
   svg.lc text {{ font-family:var(--sans); fill:var(--muted); }}
   .band {{ width:18px; height:11px; border-radius:2px; }}
@@ -173,6 +179,11 @@ def main():
   .facts h3 {{ margin:0 0 .2rem; font-size:1.05rem; font-family:var(--mono); }}
   .facts .sub {{ color:var(--muted); font-size:.82rem; margin:0 0 .9rem; }}
   dl.kv {{ margin:0; display:grid; grid-template-columns:auto 1fr; gap:.3rem .9rem; }}
+  .factgrid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:.4rem 2rem; align-items:start; }}
+  .facthead {{ display:flex; flex-wrap:wrap; align-items:baseline;
+    gap:.5rem 1.2rem; margin-bottom:.8rem; }}
+  .facthead h3 {{ margin:0; }}
   dl.kv dt {{ color:var(--muted); font-size:.82rem; }}
   dl.kv dd {{ margin:0; font-size:.84rem; text-align:right;
     font-variant-numeric:tabular-nums; }}
@@ -182,6 +193,13 @@ def main():
   .big.good {{ color:var(--good); }} .big.bad {{ color:var(--crit); }}
   .delta {{ font-size:.82rem; }}
   .delta.good {{ color:var(--good); }} .delta.bad {{ color:var(--crit); }}
+  .facthead .big {{ margin-left:auto; }}
+  /* At full page width the external readings also run as columns, with the
+     label above its value so the two stay visually paired. */
+  .extbox.wide dl.kv {{ grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:.2rem 2rem; }}
+  .extbox.wide dl.kv dt {{ grid-row:1; }}
+  .extbox.wide dl.kv dd {{ grid-row:2; text-align:left; font-size:.95rem; }}
   .extbox {{ background:var(--surface-2); border-left:3px solid var(--ext);
     border-radius:0 8px 8px 0; padding:.7rem .9rem; margin-top:.9rem;
     font-size:.84rem; }}
@@ -251,6 +269,8 @@ def main():
 
   <div class="stage">
     <div class="plotbox">
+     <div class="plots">
+      <div>
       <svg class="sky" id="sky" viewBox="0 0 440 400" role="img"
            aria-label="Sky localization comparison for the selected burst"></svg>
       <div class="legend">
@@ -260,8 +280,10 @@ def main():
         <span class="key"><span class="star">&#9733;</span> other mission</span>
       </div>
 
+      </div>
+
       <div class="lcwrap">
-        <svg class="lc" id="lc" viewBox="0 0 440 210" role="img"
+        <svg class="lc" id="lc" viewBox="0 0 460 300" role="img"
              aria-label="Lightcurve for the selected burst with the source and background windows marked"></svg>
         <div class="legend">
           <span class="key"><span class="band t90b"></span> full T90</span>
@@ -270,6 +292,7 @@ def main():
           <span class="key"><span class="sw pk"></span> fitted background</span>
         </div>
       </div>
+     </div>
     </div>
 
     <div class="facts" id="facts"></div>
@@ -409,6 +432,20 @@ def main():
     x0 -= padx; x1 += padx; y0 -= pady; y1 += pady;
 
     var iw = W - M.l - M.r, ih = H - M.t - M.b;
+
+    // Keep degrees square. One degree of RA covers cos(dec) times as much sky
+    // as one degree of Dec, so without this the regions stretch to fill the
+    // box and a circular error region reads as an ellipse.
+    var cosd = Math.max(Math.cos(cy * Math.PI / 180), 0.05);
+    var spanX = (x1 - x0) * cosd, spanY = y1 - y0;
+    var want = iw / ih;
+    if (spanX / spanY < want) {{
+      var grow = (spanY * want - spanX) / cosd / 2;
+      x0 -= grow; x1 += grow;
+    }} else {{
+      var growY = (spanX / want - spanY) / 2;
+      y0 -= growY; y1 += growY;
+    }}
     // RA increases to the left, the astronomical convention.
     function px(v) {{ return M.l + iw * (x1 - v) / (x1 - x0 || 1); }}
     function py(v) {{ return M.t + ih * (y1 - v) / (y1 - y0 || 1); }}
@@ -500,7 +537,7 @@ def main():
     var L = r.L;
     if (!L) {{ lcsvg.innerHTML = ''; return; }}
     var COL = colors();
-    var W = 440, H = 210, M = {{l: 52, r: 10, t: 10, b: 32}};
+    var W = 460, H = 300, M = {{l: 56, r: 12, t: 12, b: 38}};
     var iw = W - M.l - M.r, ih = H - M.t - M.b;
 
     var e = L.e, rate = L.r, bkg = L.b;
@@ -597,30 +634,42 @@ def main():
     var cls = r.ps < 2 ? 'good' : (r.ps > 10 ? 'bad' : '');
     var dcls = d < 0 ? 'good' : (d > 0 ? 'bad' : '');
     var h = '';
+    // The panel spans the full page width, so readings are split into columns;
+    // one long list would strand each label a thousand pixels from its value.
+    h += '<div class="facthead">';
     h += '<h3>' + esc(r.t) + '</h3>';
-    h += '<p class="sub">' + esc(r.n) + ' &middot; T90 ' + r.t90 + ' s (' + r.k +
-         ') &middot; detectors ' + esc(r.det.join(', ')) + '</p>';
-    h += '<div class="big ' + cls + '">' + r.ps.toFixed(2) + '\\u00B0</div>';
-    h += '<div class="delta ' + dcls + '">best-S/N vs official &middot; ' +
+    h += '<span class="sub">' + esc(r.n) + ' &middot; T90 ' + r.t90 + ' s (' + r.k +
+         ') &middot; detectors ' + esc(r.det.join(', ')) + '</span>';
+    h += '<span class="big ' + cls + '">' + r.ps.toFixed(2) + '\\u00B0</span>';
+    h += '<span class="delta ' + dcls + '">' +
          (d === 0 ? 'unchanged from T90 window'
                   : (d < 0 ? 'improved by ' + Math.abs(d).toFixed(2) + '\\u00B0'
-                           : 'worse by ' + d.toFixed(2) + '\\u00B0') + ' vs T90 window') + '</div>';
-    h += '<div class="sep"></div>';
+                           : 'worse by ' + d.toFixed(2) + '\\u00B0') + ' vs T90') +
+         '</span>';
+    h += '</div>';
+    h += '<div class="factgrid">';
     h += '<dl class="kv">'
       + '<dt>Official centroid</dt><dd>' + r.oc[0].toFixed(2) + ', ' + r.oc[1].toFixed(2) + '</dd>'
       + '<dt>Mine, T90 window</dt><dd>' + r.ac[0].toFixed(2) + ', ' + r.ac[1].toFixed(2) + '</dd>'
       + '<dt>Mine, best S/N</dt><dd>' + r.pc[0].toFixed(2) + ', ' + r.pc[1].toFixed(2) + '</dd>'
+      + '<dt>Catalog position</dt><dd>' + r.cat[0].toFixed(2) + ', ' + r.cat[1].toFixed(2) + '</dd>'
+      + '</dl>';
+    h += '<dl class="kv">'
       + '<dt>Separation, T90</dt><dd>' + r.as.toFixed(2) + '\\u00B0</dd>'
       + '<dt>Separation, best S/N</dt><dd>' + r.ps.toFixed(2) + '\\u00B0</dd>'
       + '<dt>Window, T90</dt><dd>' + r.aw.toFixed(2) + ' s</dd>'
       + '<dt>Window, best S/N</dt><dd>' + r.pw.toFixed(2) + ' s</dd>'
+      + '</dl>';
+    h += '<dl class="kv">'
       + '<dt>90% area, official</dt><dd>' + r.oa + ' sq&deg;</dd>'
       + '<dt>90% area, mine</dt><dd>' + r.pa + ' sq&deg;</dd>'
+      + '<dt>Binning</dt><dd>' + (r.L ? r.L.ts + ' ms' : '&mdash;') + '</dd>'
       + '</dl>';
+    h += '</div>';
     if (r.x) {{
       var best = Math.min(r.x.do, r.x.da, r.x.dp);
       function mark(v) {{ return v === best ? ' \\u2190 closest' : ''; }}
-      h += '<div class="extbox">'
+      h += '<div class="extbox wide">'
         + '<strong>' + esc(r.x.s) + '</strong> position ' + esc(r.x.n)
         + ' &mdash; ' + r.x.c[0].toFixed(4) + ', ' + r.x.c[1].toFixed(4)
         + '<dl class="kv" style="margin-top:.5rem">'
