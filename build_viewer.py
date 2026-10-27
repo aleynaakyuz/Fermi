@@ -15,6 +15,7 @@ import statistics
 import datetime
 
 SRC = "site/vec/bursts"
+LCSRC = "site/vec/lc"
 OUT = "site/viewer.html"
 
 OFFICIAL_C = "#2f6fd0"
@@ -30,6 +31,22 @@ def main():
             records.append(json.load(handle))
     if not records:
         raise SystemExit("no contour data; run extract_contours.py first")
+
+    # Lightcurves live in their own files because they are produced by a
+    # separate, much cheaper pass that does not need the DoL fit.
+    lc = {}
+    for path in glob.glob(os.path.join(LCSRC, "*.json")):
+        with open(path) as handle:
+            row = json.load(handle)
+        lc[row["t"]] = row
+    missing = 0
+    for rec in records:
+        row = lc.get(rec["t"])
+        if row is None:
+            missing += 1
+            continue
+        rec["L"] = {k: row[k] for k in ("ts", "e", "r", "b", "w90", "wsn", "wbg")}
+    print(f"  lightcurves attached to {len(records) - missing}/{len(records)} bursts")
 
     longs = [r for r in records if r["k"] == "long"]
     shorts = [r for r in records if r["k"] == "short"]
@@ -142,6 +159,13 @@ def main():
   .sw.t90 {{ border-color:var(--t90); border-top-style:dashed; }}
   .sw.pk  {{ border-color:var(--peak); }}
   .star {{ color:var(--ext); font-size:1rem; line-height:1; }}
+  .lcwrap {{ margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--rule); }}
+  svg.lc {{ width:100%; height:auto; display:block; }}
+  svg.lc text {{ font-family:var(--sans); fill:var(--muted); }}
+  .band {{ width:18px; height:11px; border-radius:2px; }}
+  .band.t90b {{ background:var(--t90); opacity:.26; outline:1px dashed var(--t90); }}
+  .band.snb {{ background:var(--t90); opacity:.6; }}
+  .band.bgb {{ background:var(--accent); opacity:.22; }}
 
   /* ---------------------------------------------------------- facts */
   .facts {{ background:var(--surface); border:1px solid var(--rule);
@@ -234,6 +258,17 @@ def main():
         <span class="key"><span class="sw t90"></span> mine, full T90</span>
         <span class="key"><span class="sw pk"></span> mine, best S/N</span>
         <span class="key"><span class="star">&#9733;</span> other mission</span>
+      </div>
+
+      <div class="lcwrap">
+        <svg class="lc" id="lc" viewBox="0 0 440 210" role="img"
+             aria-label="Lightcurve for the selected burst with the source and background windows marked"></svg>
+        <div class="legend">
+          <span class="key"><span class="band t90b"></span> full T90</span>
+          <span class="key"><span class="band snb"></span> best-S/N window</span>
+          <span class="key"><span class="band bgb"></span> background</span>
+          <span class="key"><span class="sw pk"></span> fitted background</span>
+        </div>
       </div>
     </div>
 
@@ -459,6 +494,97 @@ def main():
     svg.innerHTML = out.join('');
   }}
 
+  // ---------------------------------------------------------- lightcurve
+  function drawLC(r) {{
+    var lcsvg = document.getElementById('lc');
+    var L = r.L;
+    if (!L) {{ lcsvg.innerHTML = ''; return; }}
+    var COL = colors();
+    var W = 440, H = 210, M = {{l: 52, r: 10, t: 10, b: 32}};
+    var iw = W - M.l - M.r, ih = H - M.t - M.b;
+
+    var e = L.e, rate = L.r, bkg = L.b;
+    var x0 = e[0], x1 = e[e.length - 1];
+    var lo = Math.min.apply(null, bkg), hi = Math.max.apply(null, rate);
+    var head = Math.max((hi - lo) * 0.10, 1);
+    var y0 = Math.max(0, lo - head), y1 = hi + head;
+
+    function px(v) {{ return M.l + iw * (v - x0) / (x1 - x0 || 1); }}
+    function py(v) {{ return M.t + ih * (y1 - v) / (y1 - y0 || 1); }}
+
+    var out = [];
+
+    function band(a, b, color, opacity, dashed) {{
+      var xa = px(Math.max(a, x0)), xb = px(Math.min(b, x1));
+      if (xb <= xa) return;
+      out.push('<rect x="' + xa.toFixed(1) + '" y="' + M.t + '" width="' +
+        (xb - xa).toFixed(1) + '" height="' + ih + '" fill="' + color +
+        '" opacity="' + opacity + '"' +
+        (dashed ? ' stroke="' + color + '" stroke-dasharray="4,3" stroke-opacity=".9"' : '') +
+        ' />');
+    }}
+
+    // Background windows first, then the full T90 span outlined, then the
+    // window actually used filled -- so what was discarded stays visible.
+    (L.wbg || []).forEach(function (w) {{ band(w[0], w[1], COL.off, 0.13); }});
+    band(L.w90[0], L.w90[1], COL.t90, 0.14, true);
+    band(L.wsn[0], L.wsn[1], COL.t90, 0.42);
+
+    out.push('<rect class="frame" x="' + M.l + '" y="' + M.t +
+             '" width="' + iw + '" height="' + ih + '" />');
+
+    function ticks(a, b, n) {{
+      var raw = (b - a) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      var step = [1, 2, 2.5, 5, 10].map(function (m) {{ return m * mag; }})
+                  .filter(function (v) {{ return v >= raw; }})[0] || mag * 10;
+      var t = [], v = Math.ceil(a / step) * step;
+      for (; v <= b; v += step) t.push(Math.round(v * 1e6) / 1e6);
+      return t;
+    }}
+
+    out.push('<g class="axis">');
+    ticks(x0, x1, 5).forEach(function (v) {{
+      var X = px(v);
+      out.push('<line x1="' + X + '" y1="' + M.t + '" x2="' + X + '" y2="' + (M.t + ih) + '"/>');
+      out.push('<text x="' + X + '" y="' + (M.t + ih + 14) +
+               '" font-size="9" text-anchor="middle">' + v + '</text>');
+    }});
+    ticks(y0, y1, 4).forEach(function (v) {{
+      var Y = py(v);
+      out.push('<line x1="' + M.l + '" y1="' + Y + '" x2="' + (M.l + iw) + '" y2="' + Y + '"/>');
+      out.push('<text x="' + (M.l - 6) + '" y="' + (Y + 3) +
+               '" font-size="9" text-anchor="end">' + v + '</text>');
+    }});
+    out.push('</g>');
+
+    // Step plot: trigdat changes bin width across the burst, so the rate is
+    // drawn across each bin rather than between bin centres.
+    var d = '';
+    for (var i = 0; i < rate.length; i++) {{
+      var xa = px(e[i]), xb = px(e[i + 1]), Y = py(rate[i]);
+      d += (i ? 'L' : 'M') + xa.toFixed(1) + ',' + Y.toFixed(1) +
+           'L' + xb.toFixed(1) + ',' + Y.toFixed(1);
+    }}
+    out.push('<path d="' + d + '" fill="none" stroke="' + COL.off +
+             '" stroke-width="1" stroke-opacity=".85" stroke-linejoin="round"/>');
+
+    var db = '';
+    for (var j = 0; j < bkg.length; j++) {{
+      var xm = (px(e[j]) + px(e[j + 1])) / 2;
+      db += (j ? 'L' : 'M') + xm.toFixed(1) + ',' + py(bkg[j]).toFixed(1);
+    }}
+    out.push('<path d="' + db + '" fill="none" stroke="' + COL.peak +
+             '" stroke-width="1.6"/>');
+
+    out.push('<text x="' + (M.l + iw / 2) + '" y="' + (H - 4) +
+             '" font-size="10" text-anchor="middle">seconds from trigger</text>');
+    out.push('<text transform="translate(12,' + (M.t + ih / 2) +
+             ') rotate(-90)" font-size="10" text-anchor="middle">counts/s</text>');
+    out.push('<text x="' + (M.l + 6) + '" y="' + (M.t + 12) +
+             '" font-size="9">' + L.ts + ' ms bins, 50-300 keV</text>');
+    lcsvg.innerHTML = out.join('');
+  }}
+
   // --------------------------------------------------------------- panel
   function esc(s) {{
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {{
@@ -513,6 +639,7 @@ def main():
     var rec = current().filter(function (r) {{ return r.t === grbSel.value; }})[0];
     if (!rec) return;
     draw(rec);
+    drawLC(rec);
     panel(rec);
   }}
 
