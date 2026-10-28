@@ -88,6 +88,18 @@ def process(trigger, row):
     rate = np.asarray(summed.data.counts).sum(axis=1) / exposure
     bkg = np.asarray(background.rates).sum(axis=1)
 
+    # Livetime stability. A polynomial background assumes the detectors are
+    # counting under roughly constant conditions. In a high-particle
+    # environment that fails: bn250223692 swings between 45% and 100% livetime
+    # as the spacecraft leaves the region, so the deadtime-corrected background
+    # is genuinely non-stationary and no polynomial order recovers it. This is
+    # the cause, measured directly, rather than a downstream symptom such as
+    # the model extrapolating negative far from any window that is used.
+    width = np.clip(tstop - tstart, 1e-9, None)
+    live = exposure / width
+    full = trigdat.sum_detectors(trigdat.triggered_detectors, timescale=timescale)
+    allrate = float(np.mean(np.asarray(full.data.counts).sum(axis=1) / width))
+
     # Edges rather than centres, so the step plot is unambiguous where trigdat
     # switches resolution and bin widths change.
     edges = np.concatenate([tstart, [tstop[-1]]])
@@ -101,6 +113,8 @@ def process(trigger, row):
         "w90": [round(float(t90_window[0]), 3), round(float(t90_window[1]), 3)],
         "wsn": [round(float(sn_window[0]), 3), round(float(sn_window[1]), 3)],
         "wbg": [[round(float(a), 1), round(float(b), 1)] for a, b in bg_times],
+        "lv": [round(float(live.min()), 3), round(float(np.ptp(live)), 3),
+               round(allrate)],
     }
 
 

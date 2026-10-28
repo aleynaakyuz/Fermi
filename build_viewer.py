@@ -29,6 +29,15 @@ BURST_NOTES = {
         "are sound. Catalogued as a GRB, but its adopted position carries a "
         "0.12 deg error radius, meaning it came from another instrument."
     ),
+    "bn250223692": (
+        "Background fit unreliable. The spacecraft was in an extreme particle "
+        "environment: 30,094 counts/s across all channels against a catalog "
+        "median of 2,489, with livetime swinging between 45% and 100% as it "
+        "left the region. The deadtime-corrected background is therefore "
+        "genuinely non-stationary, and no polynomial order recovers it -- "
+        "orders 1 to 4 were tried, and order 4 diverged to -368,000 counts/s. "
+        "Treat both positions here as unmeasured rather than wrong."
+    ),
     "bn200306934": (
         "The full-T90 result here is a non-detection, not a bad position. "
         "T90 is 0.99 s but T50 only 0.10 s, so the burst is a tenth-of-a-second "
@@ -40,6 +49,11 @@ BURST_NOTES = {
         "rather than a measurement."
     ),
 }
+
+# A polynomial background assumes roughly constant counting conditions. Above
+# this livetime swing that assumption is broken and the background estimate is
+# not trustworthy, whatever the fit residual looks like. 7 of 2049 bursts.
+LIVETIME_SWING_LIMIT = 0.20
 
 OFFICIAL_C = "#2f6fd0"
 T90_C = "#b8690a"
@@ -69,6 +83,15 @@ def main():
             missing += 1
             continue
         rec["L"] = {k: row[k] for k in ("ts", "e", "r", "b", "w90", "wsn", "wbg")}
+        live_min, swing, allrate = row.get("lv", [1.0, 0.0, 0])
+        if swing > LIVETIME_SWING_LIMIT:
+            rec["warn"] = (
+                f"Unstable livetime: it swings by {swing:.0%} over the run "
+                f"(low of {live_min:.0%}), with {allrate:,} counts/s across all "
+                f"channels. A polynomial background assumes steady counting "
+                f"conditions, so the background estimate here -- and both "
+                f"positions drawn from it -- should be treated as unreliable."
+            )
     print(f"  lightcurves attached to {len(records) - missing}/{len(records)} bursts")
 
     for rec in records:
@@ -76,6 +99,7 @@ def main():
         if note:
             rec["note"] = note
     print(f"  notes attached to {sum(1 for r in records if 'note' in r)} bursts")
+    print(f"  livetime flag raised on {sum(1 for r in records if 'warn' in r)} bursts")
 
     longs = [r for r in records if r["k"] == "long"]
     shorts = [r for r in records if r["k"] == "short"]
@@ -230,6 +254,13 @@ def main():
     line-height:1.5; color:var(--ink-soft); background:var(--surface-2);
     border-left:3px solid var(--warn-note); border-radius:0 8px 8px 0; }}
   .burstnote strong {{ color:var(--ink); }}
+  /* The flag is a stronger statement than a note: it says the measurement
+     rests on an assumption that does not hold here. */
+  .burstwarn {{ margin:0 0 .9rem; padding:.7rem .9rem; font-size:.84rem;
+    line-height:1.5; color:var(--ink-soft); background:var(--surface-2);
+    border-left:3px solid var(--crit); border-radius:0 8px 8px 0;
+    max-width:none; }}
+  .burstwarn strong {{ color:var(--crit); }}
   /* At full page width the external readings also run as columns, with the
      label above its value so the two stay visually paired. */
   .extbox.wide dl.kv {{ grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
@@ -441,13 +472,14 @@ def main():
   function fillGrbs(keep) {{
     var list = ordered();
     grbSel.innerHTML = list.map(function (r) {{
-      var tag = (r.x ? ' *' : '') + (r.note ? ' !' : '');
+      var tag = (r.x ? ' *' : '') + (r.warn ? ' ~' : '') + (r.note ? ' !' : '');
       return '<option value="' + r.t + '">' + r.t + '  (' + r.ps.toFixed(2) +
              '\\u00B0' + tag + ')</option>';
     }}).join('');
     if (keep && list.some(function (r) {{ return r.t === keep; }})) grbSel.value = keep;
     pickcount.textContent = list.length +
-      ' bursts  \\u00B7  * = external position  \\u00B7  ! = has a note';
+      ' bursts  \\u00B7  * = external position  \\u00B7  ! = note  ' +
+      '\\u00B7  ~ = unreliable background';
   }}
 
   // ---------------------------------------------------------------- plot
@@ -822,6 +854,9 @@ def main():
                            : 'worse by ' + d.toFixed(2) + '\\u00B0') + ' vs T90') +
          '</span>';
     h += '</div>';
+    if (r.warn) {{
+      h += '<p class="burstwarn"><strong>Flagged.</strong> ' + esc(r.warn) + '</p>';
+    }}
     if (r.note) {{
       h += '<p class="burstnote"><strong>Note.</strong> ' + esc(r.note) + '</p>';
     }}
