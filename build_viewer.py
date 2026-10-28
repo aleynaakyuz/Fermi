@@ -163,9 +163,12 @@ def main():
   .stage {{ display:flex; flex-direction:column; gap:1.2rem; }}
   /* Plots get the full page width and sit side by side; the sky region is
      roughly square and the lightcurve wants length, so the split is uneven. */
-  .plots {{ display:grid; grid-template-columns:minmax(0,1.12fr) minmax(0,1.3fr);
+  /* Two sky panels across the top, the lightcurve full width beneath them. */
+  .plots {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
     gap:1.3rem; align-items:start; }}
   @media (max-width:860px) {{ .plots {{ grid-template-columns:1fr; }} }}
+  .panelcap {{ font-size:.74rem; color:var(--muted); line-height:1.45;
+    margin:.45rem 0 0; max-width:none; }}
   .plotbox {{ background:var(--surface); border:1px solid var(--rule);
     border-radius:12px; padding:1rem; box-shadow:var(--shadow); }}
   svg.sky {{ width:100%; height:auto; display:block; }}
@@ -181,10 +184,8 @@ def main():
   .sw.t90 {{ border-color:var(--t90); border-top-style:dashed; }}
   .sw.pk  {{ border-color:var(--peak); }}
   .star {{ color:var(--ext); font-size:1rem; line-height:1; }}
-  .lcwrap {{ display:flex; flex-direction:column; }}
-  @media (max-width:860px) {{
-    .lcwrap {{ margin-top:1rem; padding-top:.9rem; border-top:1px solid var(--rule); }}
-  }}
+  .lcwrap {{ display:flex; flex-direction:column; margin-top:1rem;
+    padding-top:.9rem; border-top:1px solid var(--rule); }}
   svg.lc {{ width:100%; height:auto; display:block; }}
   svg.lc text {{ font-family:var(--sans); fill:var(--muted); }}
   .band {{ width:18px; height:11px; border-radius:2px; }}
@@ -297,7 +298,19 @@ def main():
      <div class="plots">
       <div>
       <svg class="sky" id="sky" viewBox="0 0 440 400" role="img"
-           aria-label="Sky localization comparison for the selected burst"></svg>
+           aria-label="Sky localization in right ascension and declination"></svg>
+      <p class="panelcap">Right ascension and declination. Familiar
+        coordinates, but stretched near the poles, where a region containing a
+        pole cannot close.</p>
+      </div>
+      <div>
+      <svg class="sky" id="sky2" viewBox="0 0 440 400" role="img"
+           aria-label="Sky localization projected about the burst, showing true shape"></svg>
+      <p class="panelcap">Projected about the burst. True shape and size at any
+        declination; rings mark degrees from the centre.</p>
+      </div>
+     </div>
+
       <div class="legend">
         <span class="key"><span class="sw off"></span> official Fermi GBM 90%</span>
         <span class="key"><span class="sw t90"></span> mine, full T90</span>
@@ -305,10 +318,8 @@ def main():
         <span class="key"><span class="star">&#9733;</span> other mission</span>
       </div>
 
-      </div>
-
       <div class="lcwrap">
-        <svg class="lc" id="lc" viewBox="0 0 460 300" role="img"
+        <svg class="lc" id="lc" viewBox="0 0 960 300" role="img"
              aria-label="Lightcurve for the selected burst with the source and background windows marked"></svg>
         <div class="legend">
           <span class="key"><span class="band t90b"></span> full T90</span>
@@ -317,7 +328,6 @@ def main():
           <span class="key"><span class="sw pk"></span> fitted background</span>
         </div>
       </div>
-     </div>
     </div>
 
     <div class="facts" id="facts"></div>
@@ -557,13 +567,140 @@ def main():
     svg.innerHTML = out.join('');
   }}
 
+  // ----------------------------------------- burst-centred azimuthal plot
+  // Azimuthal equidistant about the burst: distance from the centre is true
+  // angular separation in any direction, so a region keeps its shape and size
+  // wherever it sits. Unlike RA/Dec this has no singularity at the poles and
+  // no seam at RA 0, which is what breaks the left-hand panel for the 3% of
+  // bursts whose region reaches a pole.
+  function drawAzim(r) {{
+    var svg2 = document.getElementById('sky2');
+    var COL = colors();
+    var W = 440, H = 400, M = 26;
+    var cx = W / 2, cy = H / 2;
+    var ra0 = r.oc[0] * Math.PI / 180, dec0 = r.oc[1] * Math.PI / 180;
+    var sin0 = Math.sin(dec0), cos0 = Math.cos(dec0);
+
+    // (ra,dec) -> offset in degrees: north up, east left.
+    function project(raDeg, decDeg) {{
+      var ra = raDeg * Math.PI / 180, dec = decDeg * Math.PI / 180;
+      var dra = ra - ra0;
+      var cosc = sin0 * Math.sin(dec) + cos0 * Math.cos(dec) * Math.cos(dra);
+      cosc = Math.max(-1, Math.min(1, cosc));
+      var c = Math.acos(cosc) * 180 / Math.PI;
+      var az = Math.atan2(Math.cos(dec) * Math.sin(dra),
+                          cos0 * Math.sin(dec) - sin0 * Math.cos(dec) * Math.cos(dra));
+      return [-c * Math.sin(az), c * Math.cos(az)];
+    }}
+
+    var maxr = 0, pts = [];
+    function scan(paths) {{
+      paths.forEach(function (flat) {{
+        for (var i = 0; i < flat.length; i += 2) {{
+          var q = project(flat[i], flat[i + 1]);
+          pts.push(q);
+          maxr = Math.max(maxr, Math.hypot(q[0], q[1]));
+        }}
+      }});
+    }}
+    scan(r.O); scan(r.A); scan(r.P);
+    if (r.x) {{
+      var qx = project(r.x.c[0], r.x.c[1]);
+      maxr = Math.max(maxr, Math.hypot(qx[0], qx[1]));
+    }}
+    if (!(maxr > 0)) {{ svg2.innerHTML = ''; return; }}
+    maxr *= 1.08;
+    var k = (Math.min(W, H) / 2 - M) / maxr;        // pixels per degree
+    function sx(q) {{ return cx + q[0] * k; }}
+    function sy(q) {{ return cy - q[1] * k; }}
+
+    var out = [];
+
+    // rings at a round angular step, labelled in degrees from the centre
+    var raw = maxr / 3;
+    var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var step = [1, 2, 2.5, 5, 10].map(function (m) {{ return m * mag; }})
+                .filter(function (v) {{ return v >= raw; }})[0] || mag * 10;
+    out.push('<g class="axis">');
+    for (var ring = step; ring <= maxr; ring += step) {{
+      out.push('<circle cx="' + cx + '" cy="' + cy + '" r="' + (ring * k).toFixed(1) +
+               '" fill="none" />');
+      out.push('<text x="' + (cx + 3) + '" y="' + (cy - ring * k - 3).toFixed(1) +
+               '" font-size="9">' + (ring % 1 ? ring.toFixed(1) : ring) +
+               '\\u00B0</text>');
+    }}
+    for (var a = 0; a < 360; a += 45) {{
+      var rad = a * Math.PI / 180;
+      out.push('<line x1="' + cx + '" y1="' + cy +
+               '" x2="' + (cx + Math.sin(rad) * maxr * k).toFixed(1) +
+               '" y2="' + (cy - Math.cos(rad) * maxr * k).toFixed(1) + '"/>');
+    }}
+    out.push('</g>');
+    out.push('<text x="' + cx + '" y="' + (M - 10) +
+             '" font-size="10" text-anchor="middle">N</text>');
+    out.push('<text x="' + (M - 12) + '" y="' + (cy + 4) +
+             '" font-size="10" text-anchor="middle">E</text>');
+
+    function poly(paths, color, dash, width) {{
+      // A layer stored as several pieces is either split at the RA seam or
+      // genuinely multi-island. The projection rejoins a seam split visually,
+      // but closing each piece with Z would draw a false chord across it, so
+      // only a single-piece layer is closed and filled.
+      var solo = paths.length === 1;
+      paths.forEach(function (flat) {{
+        var d = '';
+        for (var i = 0; i < flat.length; i += 2) {{
+          var q = project(flat[i], flat[i + 1]);
+          d += (i ? 'L' : 'M') + sx(q).toFixed(1) + ',' + sy(q).toFixed(1);
+        }}
+        if (!d) return;
+        out.push('<path d="' + d + (solo ? 'Z' : '') + '" fill="' +
+                 (solo ? color : 'none') + '"' +
+                 (solo ? ' fill-opacity="0.07"' : '') +
+                 ' stroke="' + color + '" stroke-width="' + width + '"' +
+                 (dash ? ' stroke-dasharray="5,3"' : '') +
+                 ' stroke-linejoin="round" />');
+      }});
+    }}
+    poly(r.O, COL.off, false, 2.1);
+    poly(r.A, COL.t90, true, 2.0);
+    poly(r.P, COL.peak, false, 1.6);
+
+    function mark(c, color, kind) {{
+      var q = project(c[0], c[1]), X = sx(q), Y = sy(q), t = 5;
+      if (kind === 'plus') {{
+        out.push('<path d="M' + (X - t) + ',' + Y + 'H' + (X + t) + 'M' + X + ',' +
+                 (Y - t) + 'V' + (Y + t) + '" stroke="' + color + '" stroke-width="2.2"/>');
+      }} else {{
+        out.push('<path d="M' + (X - t) + ',' + (Y - t) + 'L' + (X + t) + ',' + (Y + t) +
+                 'M' + (X + t) + ',' + (Y - t) + 'L' + (X - t) + ',' + (Y + t) +
+                 '" stroke="' + color + '" stroke-width="2.2"/>');
+      }}
+    }}
+    mark(r.oc, COL.off, 'plus');
+    mark(r.pc, COL.peak, 'x');
+
+    if (r.x) {{
+      var q = project(r.x.c[0], r.x.c[1]), X = sx(q), Y = sy(q);
+      var star = [], R = 8.5, rr = 3.6;
+      for (var n = 0; n < 10; n++) {{
+        var ang = -Math.PI / 2 + n * Math.PI / 5, rad2 = (n % 2 ? rr : R);
+        star.push((X + rad2 * Math.cos(ang)).toFixed(1) + ',' +
+                  (Y + rad2 * Math.sin(ang)).toFixed(1));
+      }}
+      out.push('<polygon points="' + star.join(' ') + '" fill="' + COL.ext +
+               '" stroke="#fff" stroke-width="1"/>');
+    }}
+    svg2.innerHTML = out.join('');
+  }}
+
   // ---------------------------------------------------------- lightcurve
   function drawLC(r) {{
     var lcsvg = document.getElementById('lc');
     var L = r.L;
     if (!L) {{ lcsvg.innerHTML = ''; return; }}
     var COL = colors();
-    var W = 460, H = 300, M = {{l: 56, r: 12, t: 12, b: 38}};
+    var W = 960, H = 300, M = {{l: 60, r: 14, t: 12, b: 38}};
     var iw = W - M.l - M.r, ih = H - M.t - M.b;
 
     var e = L.e, rate = L.r, bkg = L.b;
@@ -719,6 +856,7 @@ def main():
     var rec = current().filter(function (r) {{ return r.t === grbSel.value; }})[0];
     if (!rec) return;
     draw(rec);
+    drawAzim(rec);
     drawLC(rec);
     panel(rec);
   }}
