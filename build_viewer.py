@@ -29,6 +29,16 @@ BURST_NOTES = {
         "are sound. Catalogued as a GRB, but its adopted position carries a "
         "0.12 deg error radius, meaning it came from another instrument."
     ),
+    "bn200306934": (
+        "The full-T90 result here is a non-detection, not a bad position. "
+        "T90 is 0.99 s but T50 only 0.10 s, so the burst is a tenth-of-a-second "
+        "spike inside a one-second T90. Integrating all of it multiplies the "
+        "background 8.5-fold while adding no signal, and significance collapses "
+        "from 5.7 sigma in the best-S/N window to 0.76 sigma over the full T90. "
+        "With no signal to fit, the region inflates to 23,223 sq deg, 56% of the "
+        "sky, so its 43.9 deg separation is a centroid drawn from half the sky "
+        "rather than a measurement."
+    ),
 }
 
 OFFICIAL_C = "#2f6fd0"
