@@ -76,9 +76,17 @@ def process(trigger, row):
 
     tstart = np.asarray(summed.data.tstart, dtype=float)
     tstop = np.asarray(summed.data.tstop, dtype=float)
-    exposure = np.clip(tstop - tstart, 1e-6, None)
+
+    # Divide by exposure, not bin width. trigdat's wide pre/post-trigger bins
+    # carry real deadtime, and in a high-particle environment the livetime can
+    # fall to half: bn250223692 runs at 45-100% livetime across its span.
+    # Using width there understates the rate by up to 2x and, worse, plots the
+    # data in different units from the fitted background, which is already
+    # deadtime-corrected -- so the model looks wrong against a flat-looking
+    # curve that is itself an artefact.
+    exposure = np.clip(np.asarray(summed.data.exposure, dtype=float), 1e-6, None)
     rate = np.asarray(summed.data.counts).sum(axis=1) / exposure
-    bkg = np.asarray(background.counts).sum(axis=1) / exposure
+    bkg = np.asarray(background.rates).sum(axis=1)
 
     # Edges rather than centres, so the step plot is unambiguous where trigdat
     # switches resolution and bin widths change.
