@@ -18,6 +18,19 @@ SRC = "site/vec/bursts"
 LCSRC = "site/vec/lc"
 OUT = "site/viewer.html"
 
+# Per-burst annotations, shown in the panel when that burst is selected.
+# Only for bursts where something about the event itself explains the result.
+BURST_NOTES = {
+    "bn200415367": (
+        "Exceptionally strong and spectrally hard, and does not fit DoL's "
+        "spectral templates. 19.7% of its net counts fall above 300 keV, the "
+        "92nd percentile for short bursts, so the standard 50-300 keV band "
+        "samples it poorly and the fit lands far off. The counts themselves "
+        "are sound. Catalogued as a GRB, but its adopted position carries a "
+        "0.12 deg error radius, meaning it came from another instrument."
+    ),
+}
+
 OFFICIAL_C = "#2f6fd0"
 T90_C = "#b8690a"
 PEAK_C = "#d9534f"
@@ -47,6 +60,12 @@ def main():
             continue
         rec["L"] = {k: row[k] for k in ("ts", "e", "r", "b", "w90", "wsn", "wbg")}
     print(f"  lightcurves attached to {len(records) - missing}/{len(records)} bursts")
+
+    for rec in records:
+        note = BURST_NOTES.get(rec["t"])
+        if note:
+            rec["note"] = note
+    print(f"  notes attached to {sum(1 for r in records if 'note' in r)} bursts")
 
     longs = [r for r in records if r["k"] == "long"]
     shorts = [r for r in records if r["k"] == "short"]
@@ -78,7 +97,7 @@ def main():
     --paper:#f5f7fa; --surface:#ffffff; --surface-2:#eef1f6;
     --ink:#141b26; --ink-soft:#46525f; --muted:#6b7686; --rule:#d8dee8;
     --accent:{OFFICIAL_C}; --t90:{T90_C}; --peak:{PEAK_C}; --ext:{EXT_C};
-    --good:#2e7d55; --crit:#bf3b36; --grid:#c9d2de;
+    --good:#2e7d55; --crit:#bf3b36; --grid:#c9d2de; --warn-note:#b0761c;
     --shadow:0 1px 2px rgba(20,27,38,.06), 0 6px 18px rgba(20,27,38,.05);
     --serif: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -89,7 +108,7 @@ def main():
       --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
       --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
       --accent:#6fa3ea; --t90:#ffd166; --peak:#ef8079; --ext:#4cc79a;
-      --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d;
+      --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d; --warn-note:#d8a04e;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
     }}
   }}
@@ -97,7 +116,7 @@ def main():
     --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
     --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
     --accent:#6fa3ea; --t90:#ffd166; --peak:#ef8079; --ext:#4cc79a;
-    --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d;
+    --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d; --warn-note:#d8a04e;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
   }}
   *,*::before,*::after {{ box-sizing:border-box; }}
@@ -196,6 +215,10 @@ def main():
   .delta {{ font-size:.82rem; }}
   .delta.good {{ color:var(--good); }} .delta.bad {{ color:var(--crit); }}
   .facthead .big {{ margin-left:auto; }}
+  .burstnote {{ margin:0 0 .9rem; padding:.7rem .9rem; font-size:.84rem;
+    line-height:1.5; color:var(--ink-soft); background:var(--surface-2);
+    border-left:3px solid var(--warn-note); border-radius:0 8px 8px 0; }}
+  .burstnote strong {{ color:var(--ink); }}
   /* At full page width the external readings also run as columns, with the
      label above its value so the two stay visually paired. */
   .extbox.wide dl.kv {{ grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
@@ -398,12 +421,13 @@ def main():
   function fillGrbs(keep) {{
     var list = ordered();
     grbSel.innerHTML = list.map(function (r) {{
-      var tag = r.x ? ' *' : '';
+      var tag = (r.x ? ' *' : '') + (r.note ? ' !' : '');
       return '<option value="' + r.t + '">' + r.t + '  (' + r.ps.toFixed(2) +
              '\\u00B0' + tag + ')</option>';
     }}).join('');
     if (keep && list.some(function (r) {{ return r.t === keep; }})) grbSel.value = keep;
-    pickcount.textContent = list.length + ' bursts  \\u00B7  * = has external position';
+    pickcount.textContent = list.length +
+      ' bursts  \\u00B7  * = external position  \\u00B7  ! = has a note';
   }}
 
   // ---------------------------------------------------------------- plot
@@ -651,6 +675,9 @@ def main():
                            : 'worse by ' + d.toFixed(2) + '\\u00B0') + ' vs T90') +
          '</span>';
     h += '</div>';
+    if (r.note) {{
+      h += '<p class="burstnote"><strong>Note.</strong> ' + esc(r.note) + '</p>';
+    }}
     h += '<div class="factgrid">';
     h += '<dl class="kv">'
       + '<dt>Official centroid</dt><dd>' + r.oc[0].toFixed(2) + ', ' + r.oc[1].toFixed(2) + '</dd>'
