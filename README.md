@@ -108,8 +108,64 @@ fetches it from the HEASARC archive.
 
 ## Data
 
-All inputs are public NASA archival data: the Fermi GBM burst catalog
-(`fermigbrst`), the Fermi LAT GRB catalog (`fermilgrb`), and the Swift GRB
-catalogs (`swiftgrb`, `swiftgrbba`), all from
-[HEASARC](https://heasarc.gsfc.nasa.gov/), plus GBM trigger data from the
-Fermi archive.
+All inputs are public NASA archival data from [HEASARC](https://heasarc.gsfc.nasa.gov/).
+Nothing in this repository is derived from private or proprietary sources.
+
+### Official Fermi GBM results
+
+The published sky maps this project is compared against — and the trigger data
+it reruns the localization on — come from the GBM trigger tree:
+
+**https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/triggers/**
+
+One directory per burst, laid out as:
+
+```
+<base>/<YYYY>/<bnYYMMDDfff>/current/glg_healpix_all_<bnYYMMDDfff>_v<NN>.fit   official sky map
+<base>/<YYYY>/<bnYYMMDDfff>/current/glg_trigdat_all_<bnYYMMDDfff>_v<NN>.fit   trigger data
+```
+
+A worked example, [GRB 181120265](https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/triggers/2018/bn181120265/current/):
+
+- [glg_healpix_all_bn181120265_v00.fit](https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/triggers/2018/bn181120265/current/glg_healpix_all_bn181120265_v00.fit)
+- [glg_trigdat_all_bn181120265_v01.fit](https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/triggers/2018/bn181120265/current/glg_trigdat_all_bn181120265_v01.fit)
+
+`download_gbm.py` reads each burst's `current/` listing rather than guessing
+filenames, because the version suffix varies — `trigdat` is usually `v01`,
+`healpix` usually `v00`, and the superseded `locprob` product was `v02` for
+some bursts. A `quicklook/` directory also exists holding an unversioned alias
+of the map; the versioned file in `current/` is the authoritative one and is
+what this project uses.
+
+**The map product depends on the era**, which is why the sample stops at 2,061
+of 4,400 catalog bursts:
+
+| Era | Localization product | Bursts |
+| --- | --- | --- |
+| 2018–2026 | `glg_healpix_all_*`, a HEALPix map | 2,061 |
+| 2014–2017 | `glg_locprob_all_*`, a gnomonic image, not HEALPix | 797 |
+| 2008–2013 | none published | 1,542 |
+
+### Catalogs
+
+Queried through the HEASARC TAP service at
+`https://heasarc.gsfc.nasa.gov/xamin/vo/tap/sync`:
+
+| Table | Used for |
+| --- | --- |
+| [`fermigbrst`](https://heasarc.gsfc.nasa.gov/W3Browse/fermi/fermigbrst.html) | GBM burst catalog — trigger list, T90, T50, fluence, positions |
+| [`fermilgrb`](https://heasarc.gsfc.nasa.gov/W3Browse/fermi/fermilgrb.html) | Fermi LAT GRB catalog; joins directly on its `gbm_cat_name` column |
+| [`swiftgrb`](https://heasarc.gsfc.nasa.gov/W3Browse/swift/swiftgrb.html) | Swift GRB catalog — **frozen at 2012-12-29** |
+| [`swiftgrbba`](https://heasarc.gsfc.nasa.gov/W3Browse/swift/swiftgrbba.html) | Swift Burst Advocate compilation — the maintained one, needed for 2013 onward |
+
+Both Swift tables are read and merged. Using `swiftgrb` alone finds 173 joint
+bursts; adding `swiftgrbba` raises that to 695, because the frozen catalog
+misses every Swift burst after 2012.
+
+### The localization code
+
+`legacy_DoL` is not a reimplementation. It is the GBM team's own ground
+localization code — DoL, Daughter of Locburst, written by Valerie Connaughton
+at UAH, ported to Python by Joshua Wood at NASA Marshall and released under
+Apache 2.0 in [astro-gdt-fermi](https://github.com/USRA-STI/gdt-fermi),
+bundled with its 16 MB of precomputed detector response tables.
