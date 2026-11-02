@@ -81,6 +81,20 @@ def process(trigger, row, ext):
     res_t90 = A.localize(trigger, row, window_mode="t90", artifacts=art_t90)
     res_peak = A.localize(trigger, row, window_mode="peak", artifacts=art_peak)
 
+    # The same best-S/N statistical map convolved with RoboBA's systematic
+    # kernel instead of the human-in-the-loop one. This is NOT a RoboBA
+    # localization -- RoboBA's interval selection is not in the package, and
+    # the centroid is unchanged because both kernels are symmetric about the
+    # peak. It shows how much of the region's size is the error model rather
+    # than the data: RoboBA's kernel has no 13-15 deg tail, so the region
+    # comes out 0.2 to 0.9 times the area.
+    from gdt.missions.fermi.gbm.localization import robo_ba_model
+    try:
+        robo = art_peak["stat_map"].convolve(
+            robo_ba_model, res_peak["grb_type"]).remove_earth()
+    except Exception:
+        robo = None
+
     official = art_peak["official"]
     rec = {
         "t": trigger,
@@ -103,6 +117,8 @@ def process(trigger, row, ext):
         "O": contours(official),
         "A": contours(art_t90["sys_map"]),
         "P": contours(art_peak["sys_map"]),
+        "R": contours(robo) if robo is not None else [],
+        "ra_area": (round(robo.area(0.9)) if robo is not None else None),
     }
     if ext is not None:
         from astropy.coordinates import SkyCoord

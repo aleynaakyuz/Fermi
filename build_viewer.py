@@ -131,6 +131,7 @@ def main():
     --paper:#f5f7fa; --surface:#ffffff; --surface-2:#eef1f6;
     --ink:#141b26; --ink-soft:#46525f; --muted:#6b7686; --rule:#d8dee8;
     --accent:{OFFICIAL_C}; --t90:{T90_C}; --peak:{PEAK_C}; --ext:{EXT_C};
+    --robo:#7c5cd6;
     --good:#2e7d55; --crit:#bf3b36; --grid:#c9d2de; --warn-note:#b0761c;
     --shadow:0 1px 2px rgba(20,27,38,.06), 0 6px 18px rgba(20,27,38,.05);
     --serif: ui-serif, Georgia, "Iowan Old Style", "Times New Roman", serif;
@@ -142,6 +143,7 @@ def main():
       --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
       --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
       --accent:#6fa3ea; --t90:#ffd166; --peak:#ef8079; --ext:#4cc79a;
+      --robo:#b39aff;
       --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d; --warn-note:#d8a04e;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
     }}
@@ -150,6 +152,7 @@ def main():
     --paper:#0e131b; --surface:#151c27; --surface-2:#1b2430;
     --ink:#e8edf4; --ink-soft:#b3becd; --muted:#8995a6; --rule:#2a3545;
     --accent:#6fa3ea; --t90:#ffd166; --peak:#ef8079; --ext:#4cc79a;
+    --robo:#b39aff;
     --good:#58b98a; --crit:#e8706a; --grid:#2f3b4d; --warn-note:#d8a04e;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.3);
   }}
@@ -217,6 +220,7 @@ def main():
   .sw.off {{ border-color:var(--accent); }}
   .sw.t90 {{ border-color:var(--t90); border-top-style:dashed; }}
   .sw.pk  {{ border-color:var(--peak); }}
+  .sw.rb  {{ border-color:var(--robo); border-top-style:dashed; }}
   .star {{ color:var(--ext); font-size:1rem; line-height:1; }}
   .lcwrap {{ display:flex; flex-direction:column; margin-top:1rem;
     padding-top:.9rem; border-top:1px solid var(--rule); }}
@@ -356,8 +360,19 @@ def main():
         <span class="key"><span class="sw off"></span> official Fermi GBM 90%</span>
         <span class="key"><span class="sw t90"></span> mine, full T90</span>
         <span class="key"><span class="sw pk"></span> mine, best S/N</span>
+        <span class="key"><span class="sw rb"></span> same fit, RoboBA error model</span>
         <span class="key"><span class="star">&#9733;</span> other mission</span>
       </div>
+      <p class="panelcap" style="max-width:68ch">
+        The purple region is <em>not</em> a separate localization. It is the
+        best-S/N fit convolved with RoboBA's systematic kernel instead of the
+        human-in-the-loop one. Both kernels are symmetric, so the centre barely
+        moves and essentially only the size changes &mdash; a median 0.66 times
+        the area, because RoboBA's kernel carries no 13&ndash;15&deg; tail. It
+        is here to show how much of a region's size is the assumed error model
+        rather than the data. RoboBA's own interval selection is not part of
+        this, and is not public.
+      </p>
 
       <div class="lcwrap">
         <svg class="lc" id="lc" viewBox="0 0 960 300" role="img"
@@ -449,7 +464,8 @@ def main():
       off: v('--accent', '{OFFICIAL_C}'),
       t90: v('--t90', '{T90_C}'),
       peak: v('--peak', '{PEAK_C}'),
-      ext: v('--ext', '{EXT_C}')
+      ext: v('--ext', '{EXT_C}'),
+      robo: v('--robo', '#7c5cd6')
     }};
   }}
 
@@ -581,6 +597,7 @@ def main():
     poly(r.O, COL.off, false, 2.1);
     poly(r.A, COL.t90, true, 2.0);
     poly(r.P, COL.peak, false, 1.6);
+    if (r.R && r.R.length) poly(r.R, COL.robo, true, 1.4);
 
     function cross(c, color, kind) {{
       var X = px(wrapNear(c[0], cx)), Y = py(c[1]), s = 5;
@@ -707,6 +724,7 @@ def main():
     poly(r.O, COL.off, false, 2.1);
     poly(r.A, COL.t90, true, 2.0);
     poly(r.P, COL.peak, false, 1.6);
+    if (r.R && r.R.length) poly(r.R, COL.robo, true, 1.4);
 
     function mark(c, color, kind) {{
       var q = project(c[0], c[1]), X = sx(q), Y = sy(q), t = 5;
@@ -877,6 +895,8 @@ def main():
       + '<dt>90% area, official</dt><dd>' + r.oa + ' sq&deg;</dd>'
       + '<dt>90% area, mine</dt><dd>' + r.pa + ' sq&deg;</dd>'
       + '<dt>Binning</dt><dd>' + (r.L ? r.L.ts + ' ms' : '&mdash;') + '</dd>'
+      + (r.ra_area ? '<dt>90% area, RoboBA kernel</dt><dd>' + r.ra_area +
+         ' sq&deg;</dd>' : '')
       + '</dl>';
     h += '</div>';
     if (r.x) {{
