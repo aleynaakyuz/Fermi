@@ -1,20 +1,26 @@
 """
 Download GBM time-tagged event (TTE) data for selected bursts.
 
-Only the 12 NaI detectors are fetched. The two BGOs are deliberately skipped:
-legacy_DoL's detector mask excludes them, and zeroing their counts was checked
-against four bursts and changed the fitted position by 0.0000 deg in every
-case. That saves 22 MB of 88 MB per burst.
+By default only the 12 NaI detectors are fetched, because legacy_DoL's
+detector mask excludes the BGOs and zeroing their counts was checked against
+four bursts and changed the fitted position by 0.0000 deg every time. That
+saves 22 MB of 100 MB per burst.
 
-TTE is ~66 MB per burst against 127 KB for trigdat, so this is selective by
-design -- pass a trigger list or a burst class, never the whole catalog.
+--with-bgo adds b0 and b1. They contribute nothing to the localization, but
+they cover 200 keV to 40 MeV where the NaIs stop at about 1 MeV, so for
+*looking* at a burst rather than fitting it they are worth having.
 
-Resumable: a detector file already on disk and intact is skipped.
+TTE is ~78 MB per burst with the NaIs alone, or ~100 MB with the BGOs, against
+127 KB for trigdat. Fetching the whole catalog is therefore a ~205 GB, several
+hour operation; the disk guard below will refuse if it would not fit.
+
+Resumable: a detector file already on disk and intact is skipped, so an
+interrupted run can simply be restarted.
 
 Usage:
     python download_tte.py --class short --limit 8
     python download_tte.py --triggers bn200826187,bn181120265
-    python download_tte.py --class short --workers 6
+    python download_tte.py --class all --with-bgo --workers 6
 """
 import argparse
 import csv
@@ -32,8 +38,12 @@ MANIFEST = "catalog/fermigbrst.csv"
 DATADIR = "data/tte"
 LOGFILE = "catalog/tte_download_log.jsonl"
 
-# The 12 NaI detectors. BGOs (b0, b1) are not fetched; see the module docstring.
+# The 12 NaI detectors, and the two BGOs which --with-bgo adds.
 NAI = [f"n{d}" for d in "0123456789ab"]
+BGO = ["b0", "b1"]
+
+# Mean observed size on disk, used only for the pre-flight estimate.
+MB_PER_DET = 6.5
 
 USER_AGENT = "fermi-grb-tte/1.0 (academic use)"
 RETRIES = 4
@@ -84,7 +94,8 @@ def save(path, payload):
     os.replace(tmp, path)
 
 
-def do_burst(trigger):
+def do_burst(trigger, dets=None):
+    dets = dets or NAI
     year = f"20{trigger[2:4]}"
     dest = os.path.join(DATADIR, trigger)
     record = {"trigger": trigger, "got": [], "cached": [], "missing": [], "bytes": 0}
@@ -92,11 +103,11 @@ def do_burst(trigger):
     have = {}
     if os.path.isdir(dest):
         for name in os.listdir(dest):
-            m = re.match(r"glg_tte_(n[0-9ab])_", name)
+            m = re.match(r"glg_tte_([nb][0-9ab])_", name)
             if m and is_intact(os.path.join(dest, name)):
                 have[m.group(1)] = name
 
-    need = [d for d in NAI if d not in have]
+    need = [d for d in dets if d not in have]
     record["cached"] = sorted(have)
     if not need:
         record["status"] = "cached"
@@ -172,16 +183,19 @@ def main():
                         help="only bursts that have an external position")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--workers", type=int, default=5)
+    parser.add_argument("--with-bgo", action="store_true",
+                        help="also fetch b0 and b1 (adds ~22 MB per burst)")
     args = parser.parse_args()
 
+    dets = NAI + BGO if args.with_bgo else NAI
     triggers = select(args)
     os.makedirs(DATADIR, exist_ok=True)
     os.makedirs(os.path.dirname(LOGFILE), exist_ok=True)
 
-    est = len(triggers) * 66 / 1024
+    est = len(triggers) * len(dets) * MB_PER_DET / 1024
     free = os.statvfs(".").f_bavail * os.statvfs(".").f_frsize / 1e9
-    log(f"{len(triggers)} bursts x 12 NaI detectors, ~{est:.1f} GB estimated, "
-        f"{free:.0f} GB free, {args.workers} workers")
+    log(f"{len(triggers)} bursts x {len(dets)} detectors, ~{est:.0f} GB "
+        f"estimated, {free:.0f} GB free, {args.workers} workers")
     if est > free * 0.8:
         log("  refusing: that would use more than 80% of free disk")
         return 1
@@ -191,7 +205,7 @@ def main():
     total = done = 0
     started = time.time()
     with open(LOGFILE, "a") as logfh, ThreadPoolExecutor(args.workers) as pool:
-        futures = {pool.submit(do_burst, t): t for t in triggers}
+        futures = {pool.submit(do_burst, t, dets): t for t in triggers}
         for future in as_completed(futures):
             trigger = futures[future]
             try:

@@ -8,15 +8,21 @@ budget, so it could only ever show a few hundred.
 
 Output: site/viewer.html
 """
+import base64
 import json
 import glob
 import os
 import statistics
 import datetime
 
+import numpy as np
+
 SRC = "site/vec/bursts"
 LCSRC = "site/vec/lc"
+DETSRC = "site/vec/det"
 OUT = "site/viewer.html"
+
+ALL_DETS = [f"n{d}" for d in "0123456789ab"] + ["b0", "b1"]
 
 # Per-burst annotations, shown in the panel when that burst is selected.
 # Only for bursts where something about the event itself explains the result.
@@ -61,6 +67,53 @@ PEAK_C = "#d9534f"
 EXT_C = "#1f9e6e"
 
 
+def pack_lightcurve(row):
+    """Re-encode a lightcurve record to cost less in the page.
+
+    The page carries every burst inline against a 16 MB cap, and the summed
+    lightcurve was its single largest component at 2.19 KB per burst. Two
+    changes recover most of that without touching what is drawn:
+
+      e -> es   trigdat's bin edges are piecewise uniform, so they are stored
+                as [start, width, count] runs. The widths carry float jitter
+                (1.024 against 1.025), which is why there are around 26 runs
+                per burst rather than the four its documented template
+                implies, but that still beats 144 explicit edges.
+      r, b -> base64 uint16 scaled to the burst's own maximum. Count rates
+                reach a few thousand per second, so 65,536 levels is far
+                finer than the one-count rounding the arrays already had.
+
+    Stored alongside as rs/bs is that maximum, so the browser can undo it.
+    """
+    edges = [float(v) for v in row["e"]]
+    runs = []
+    i = 0
+    while i < len(edges) - 1:
+        width = round(edges[i + 1] - edges[i], 4)
+        n = 1
+        while (i + n + 1 < len(edges)
+               and round(edges[i + n + 1] - edges[i + n], 4) == width):
+            n += 1
+        runs.append([round(edges[i], 4), width, n])
+        i += n
+
+    def pack(values):
+        arr = np.asarray(values, dtype=float)
+        top = float(arr.max()) if arr.size else 0.0
+        if top <= 0:
+            top = 1.0
+        q = np.clip(np.rint(arr / top * 65535.0), 0, 65535).astype("<u2")
+        return base64.b64encode(q.tobytes()).decode("ascii"), round(top, 2)
+
+    r_b64, r_top = pack(row["r"])
+    b_b64, b_top = pack(row["b"])
+    return {
+        "ts": row["ts"], "es": runs,
+        "r": r_b64, "rs": r_top, "b": b_b64, "bs": b_top,
+        "w90": row["w90"], "wsn": row["wsn"], "wbg": row["wbg"],
+    }
+
+
 def main():
     records = []
     for path in sorted(glob.glob(os.path.join(SRC, "*.json"))):
@@ -82,7 +135,7 @@ def main():
         if row is None:
             missing += 1
             continue
-        rec["L"] = {k: row[k] for k in ("ts", "e", "r", "b", "w90", "wsn", "wbg")}
+        rec["L"] = pack_lightcurve(row)
         live_min, swing, allrate = row.get("lv", [1.0, 0.0, 0])
         if swing > LIVETIME_SWING_LIMIT:
             rec["warn"] = (
@@ -93,6 +146,42 @@ def main():
                 f"positions drawn from it -- should be treated as unreliable."
             )
     print(f"  lightcurves attached to {len(records) - missing}/{len(records)} bursts")
+
+    # Per-detector curves from TTE. A separate pass again, and one that only
+    # covers bursts whose 14 TTE files are on disk, so the panel is drawn only
+    # where there is something to draw.
+    det = {}
+    for path in glob.glob(os.path.join(DETSRC, "*.json")):
+        with open(path) as handle:
+            row = json.load(handle)
+        det[row["t"]] = row
+    for rec in records:
+        row = det.get(rec["t"])
+        if row is None:
+            continue
+        rec["D"] = {k: row[k] for k in ("lo", "hi", "nb", "sn", "sb",
+                                        "d", "net")}
+        # 2,032 of 2,049 bursts have all fourteen detectors in the usual
+        # order, so the list is only carried for the handful that do not --
+        # HEASARC omits TTE for the odd detector on the odd trigger. Spelling
+        # it out every time cost 145 KB of a page with little room to spare.
+        if row["dets"] != ALL_DETS:
+            rec["D"]["dets"] = row["dets"]
+        if "trg" in row:
+            rec["D"]["trg"] = row["trg"]
+        if "dead" in row:
+            rec["D"]["dead"] = row["dead"]
+    print(f"  detector panels attached to {sum(1 for r in records if 'D' in r)}"
+          f"/{len(records)} bursts")
+
+    # The display bands are the same for every burst, so they are stated once
+    # in the caption rather than repeated 2,000 times in the data.
+    all_dets = json.dumps(ALL_DETS)
+    any_det = next(iter(det.values()), None)
+    nai_band = "8-900 keV"
+    if any_det:
+        band = any_det["eb"]["nai"]
+        nai_band = f"{band[0]:g}-{band[1]:g} keV"
 
     for rec in records:
         note = BURST_NOTES.get(rec["t"])
@@ -232,6 +321,29 @@ def main():
   .band.t90b {{ background:transparent; border:1.5px dashed var(--t90); }}
   .band.snb {{ background:var(--t90); }}
   .band.bgb {{ background:var(--accent); opacity:.45; }}
+
+  /* ------------------------------------------------- per-detector panels */
+  .detwrap {{ margin-top:1rem; padding-top:.9rem;
+    border-top:1px solid var(--rule); }}
+  /* Six columns, so the twelve NaIs fall as a tidy 6x2 and the two BGOs sit
+     under them at exactly the same cell width. auto-fit was tried first and
+     chose eight columns at this page width, which wraps the NaIs 8 + 4 and
+     blows the BGO cells up to double size. The column count steps down by
+     breakpoint instead. */
+  .detgrid {{ display:grid; gap:.45rem; grid-template-columns:repeat(6,1fr); }}
+  @media (max-width:980px) {{ .detgrid {{ grid-template-columns:repeat(4,1fr); }} }}
+  @media (max-width:620px) {{ .detgrid {{ grid-template-columns:repeat(3,1fr); }} }}
+  @media (max-width:420px) {{ .detgrid {{ grid-template-columns:repeat(2,1fr); }} }}
+  svg.dsvg {{ width:100%; height:auto; display:block;
+    background:var(--surface-2,transparent); border-radius:5px; }}
+  svg.dsvg text {{ font-family:var(--mono); fill:var(--muted); }}
+  svg.dsvg text.dlab {{ fill:var(--ink-soft); font-weight:650; }}
+  svg.dsvg text.dlab.on {{ fill:var(--peak); }}
+  svg.dsvg text.dnet {{ fill:var(--ink-soft); }}
+  svg.dsvg text.dsc {{ fill:var(--muted); opacity:.75; }}
+  .detsplit {{ font-size:.72rem; color:var(--muted); margin:.7rem 0 .4rem;
+    padding-top:.5rem; border-top:1px dashed var(--rule); }}
+  .detaxis {{ margin-top:.55rem; font-family:var(--mono); font-size:.7rem; }}
 
   /* ---------------------------------------------------------- facts */
   .facts {{ background:var(--surface); border:1px solid var(--rule);
@@ -384,6 +496,22 @@ def main():
           <span class="key"><span class="sw pk"></span> fitted background</span>
         </div>
       </div>
+
+      <div class="detwrap">
+        <p class="panelcap" style="max-width:78ch;margin-bottom:.7rem">
+          Each detector on its own, from TTE. GBM has no optics &mdash; it
+          works out where a burst was purely by comparing how much each
+          detector saw, so this is the fit's actual input. All twelve NaI
+          panels share one vertical scale, printed at the lower right of each,
+          because the comparison <em>between</em> them is the whole signal;
+          scaling each to its own peak would make every detector look alike.
+          The two BGOs are scaled separately, since their band is far wider
+          and their background correspondingly higher. Detectors that
+          triggered are marked <span style="color:var(--peak)">&#9733;</span>,
+          and the figure at the top right is net counts in the T90 window.
+        </p>
+        <div id="dets"></div>
+      </div>
     </div>
 
     <div class="facts" id="facts"></div>
@@ -465,7 +593,8 @@ def main():
       t90: v('--t90', '{T90_C}'),
       peak: v('--peak', '{PEAK_C}'),
       ext: v('--ext', '{EXT_C}'),
-      robo: v('--robo', '#7c5cd6')
+      robo: v('--robo', '#7c5cd6'),
+      muted: v('--muted', '#6b7686')
     }};
   }}
 
@@ -754,11 +883,56 @@ def main():
     svg2.innerHTML = out.join('');
   }}
 
+  // ------------------------------------------------- compact array decoding
+  // The page carries every burst inline, so the bulky arrays travel encoded
+  // and are expanded the first time a burst is actually looked at.
+  function b64bytes(s) {{
+    var bin = atob(s), n = bin.length, out = new Uint8Array(n);
+    for (var i = 0; i < n; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }}
+
+  function unpackLC(L) {{
+    if (L.e) return;                       // already expanded
+    var e = [], i, j, seg;
+    for (i = 0; i < L.es.length; i++) {{
+      seg = L.es[i];
+      for (j = 0; j < seg[2]; j++) e.push(seg[0] + seg[1] * j);
+    }}
+    seg = L.es[L.es.length - 1];
+    e.push(seg[0] + seg[1] * seg[2]);
+    L.e = e;
+    function de(b64, top) {{
+      var u = b64bytes(b64), n = u.length >> 1, out = new Array(n);
+      for (var k = 0; k < n; k++) {{
+        out[k] = (u[2 * k] | (u[2 * k + 1] << 8)) / 65535 * top;
+      }}
+      return out;
+    }}
+    L.r = de(L.r, L.rs);
+    L.b = de(L.b, L.bs);
+  }}
+
+  var ALL_DETS = {all_dets};
+
+  function unpackDets(D) {{
+    if (D.rows) return;
+    // dets is only present when the burst is missing a detector; the common
+    // case is all fourteen in the standard order and is left implicit.
+    if (!D.dets) D.dets = ALL_DETS;
+    var u = b64bytes(D.d), nb = D.nb, rows = {{}};
+    for (var i = 0; i < D.dets.length; i++) {{
+      rows[D.dets[i]] = u.subarray(i * nb, (i + 1) * nb);
+    }}
+    D.rows = rows;
+  }}
+
   // ---------------------------------------------------------- lightcurve
   function drawLC(r) {{
     var lcsvg = document.getElementById('lc');
     var L = r.L;
     if (!L) {{ lcsvg.innerHTML = ''; return; }}
+    unpackLC(L);
     var COL = colors();
     var W = 960, H = 300, M = {{l: 60, r: 14, t: 12, b: 38}};
     var iw = W - M.l - M.r, ih = H - M.t - M.b;
@@ -917,12 +1091,109 @@ def main():
     facts.innerHTML = h;
   }}
 
+  // ------------------------------------------------------ detector panels
+  // GBM has no optics. It works out where a burst was by comparing how much
+  // each detector saw, so these fourteen panels are the actual input to the
+  // fit rather than an illustration of it.
+  function drawDets(r) {{
+    var host = document.getElementById('dets');
+    var D = r.D;
+    if (!D) {{
+      host.innerHTML = '<p class="panelcap">No TTE data for this burst.</p>';
+      return;
+    }}
+    unpackDets(D);
+    var COL = colors();
+    var trg = {{}}, dead = {{}};
+    (D.trg || []).forEach(function (d) {{ trg[d] = 1; }});
+    (D.dead || []).forEach(function (d) {{ dead[d] = 1; }});
+
+    var W = 150, H = 76, M = {{l: 3, r: 3, t: 13, b: 11}};
+    var iw = W - M.l - M.r, ih = H - M.t - M.b;
+    var span = D.hi - D.lo || 1;
+    function px(t) {{ return M.l + iw * (t - D.lo) / span; }}
+
+    function cell(det) {{
+      var row = D.rows[det];
+      if (!row) return '';
+      var i = D.dets.indexOf(det), net = D.net[i];
+      var bgo = det.charAt(0) === 'b';
+      var sc = bgo ? D.sb : D.sn;
+      var out = ['<svg class="dsvg" viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
+                 'aria-label="' + det + ', net ' + net + ' counts">'];
+
+      // Same window shading as the summed lightcurve above, so the eye can
+      // carry across between the two.
+      function band(a, b, color, op) {{
+        var xa = px(Math.max(a, D.lo)), xb = px(Math.min(b, D.hi));
+        if (xb <= xa) return;
+        out.push('<rect x="' + xa.toFixed(1) + '" y="' + M.t + '" width="' +
+                 (xb - xa).toFixed(1) + '" height="' + ih + '" fill="' + color +
+                 '" fill-opacity="' + op + '" />');
+      }}
+      if (r.L) {{
+        band(r.L.w90[0], r.L.w90[1], COL.t90, 0.13);
+        band(r.L.wsn[0], r.L.wsn[1], COL.t90, 0.30);
+      }}
+      // The trigger instant, so each panel can be read without hunting for
+      // the shared axis below it.
+      if (D.lo < 0 && D.hi > 0) {{
+        out.push('<line x1="' + px(0).toFixed(1) + '" y1="' + M.t + '" x2="' +
+                 px(0).toFixed(1) + '" y2="' + (M.t + ih) + '" stroke="' +
+                 COL.muted + '" stroke-width=".7" stroke-dasharray="2,2" ' +
+                 'stroke-opacity=".8" />');
+      }}
+      out.push('<rect class="frame" x="' + M.l + '" y="' + M.t +
+               '" width="' + iw + '" height="' + ih + '" />');
+
+      var stroke = dead[det] ? COL.muted : (trg[det] ? COL.peak : COL.off);
+      var d = '', w = iw / row.length;
+      for (var k = 0; k < row.length; k++) {{
+        var y = (M.t + ih * (1 - row[k] / 255)).toFixed(1);
+        var xa = (M.l + k * w).toFixed(1), xb = (M.l + (k + 1) * w).toFixed(1);
+        d += (k ? 'L' : 'M') + xa + ',' + y + 'L' + xb + ',' + y;
+      }}
+      out.push('<path d="' + d + '" fill="none" stroke="' + stroke +
+               '" stroke-width="1" stroke-linejoin="round" />');
+      out.push('<text x="' + M.l + '" y="9" font-size="9" class="dlab' +
+               (trg[det] ? ' on' : '') + '">' + det +
+               (trg[det] ? ' \\u2605' : '') + '</text>');
+      out.push('<text x="' + (W - M.r) + '" y="9" font-size="8.5" ' +
+               'text-anchor="end" class="dnet">' +
+               (net > 0 ? '+' : '') + net.toLocaleString() + '</text>');
+      out.push('<text x="' + (W - M.r) + '" y="' + (H - 2) + '" font-size="7.5" ' +
+               'text-anchor="end" class="dsc">' + Math.round(sc[0]) + '-' +
+               Math.round(sc[0] + sc[1]) + ' c/s</text>');
+      out.push('</svg>');
+      return out.join('');
+    }}
+
+    var nai = ['n0','n1','n2','n3','n4','n5','n6','n7','n8','n9','na','nb'];
+    var html = '<div class="detgrid">' + nai.map(cell).join('') + '</div>';
+    html += '<div class="detsplit">BGO &mdash; 200 keV to 40 MeV, and no part '
+         +  'of the localization fit</div>';
+    html += '<div class="detgrid bgo">' + ['b0','b1'].map(cell).join('') + '</div>';
+
+    // These panels are zoomed on the burst, unlike the summed lightcurve
+    // above which spans all of trigdat, so the range has to be stated.
+    var bin = (D.hi - D.lo) / D.nb;
+    var nd = bin < 0.1 ? 0 : (bin < 1 ? 1 : 2);
+    html += '<p class="panelcap detaxis">' +
+      D.lo.toFixed(nd < 2 ? 2 : 1) + ' to +' + D.hi.toFixed(nd < 2 ? 2 : 1) +
+      ' s from trigger &middot; ' +
+      (bin < 1 ? Math.round(bin * 1000) + ' ms' : bin.toFixed(2) + ' s') +
+      ' bins &middot; dashed line is the trigger &middot; NaI {nai_band}, ' +
+      'shown on a common scale</p>';
+    host.innerHTML = html;
+  }}
+
   function show() {{
     var rec = current().filter(function (r) {{ return r.t === grbSel.value; }})[0];
     if (!rec) return;
     draw(rec);
     drawAzim(rec);
     drawLC(rec);
+    drawDets(rec);
     panel(rec);
   }}
 

@@ -12,6 +12,7 @@ catalog/_xmatch_cache/
 catalog/download_log.jsonl
 catalog/balrog_download_log.jsonl
 catalog/tte_download_log.jsonl
+catalog/tte_run.log
 
 # Intermediate run artefacts
 site/*.json
