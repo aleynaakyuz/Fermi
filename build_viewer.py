@@ -20,7 +20,12 @@ import numpy as np
 SRC = "site/vec/bursts"
 LCSRC = "site/vec/lc"
 DETSRC = "site/vec/det"
+CHSRC = "site/vec/chan"
 OUT = "site/viewer.html"
+
+# Must match extract_channels.py.
+CHAN_EMIN, CHAN_EMAX = 8.0, 900.0
+CHAN_BANDS = [8, 15, 25, 50, 100, 200, 350, 600, 900]
 
 ALL_DETS = [f"n{d}" for d in "0123456789ab"] + ["b0", "b1"]
 
@@ -65,6 +70,29 @@ OFFICIAL_C = "#2f6fd0"
 T90_C = "#b8690a"
 PEAK_C = "#d9534f"
 EXT_C = "#1f9e6e"
+
+
+def pack_contours(paths):
+    """Pack contour polygons as base64 uint16 pairs at 0.01 degree.
+
+    The four sky regions were the page's largest cost at 8.55 MB, written as
+    JSON text at 12.8 characters per point against the four bytes a point
+    actually needs. The stored coordinates already sit exactly on a 0.01
+    degree grid -- checked across all 666,145 points, maximum deviation
+    4e-12 -- so this throws nothing away.
+
+    RA*100 reaches 36000 and Dec*100 spans -9000 to 9000, so Dec carries a
+    +90 degree offset and both fit unsigned. Little-endian, to match the
+    DataView read in the browser.
+    """
+    out = []
+    for path in paths:
+        a = np.asarray(path, dtype=float)
+        q = np.empty(a.size, dtype="<u2")
+        q[0::2] = np.rint(a[0::2] * 100.0)
+        q[1::2] = np.rint((a[1::2] + 90.0) * 100.0)
+        out.append(base64.b64encode(q.tobytes()).decode("ascii"))
+    return out
 
 
 def pack_lightcurve(row):
@@ -122,6 +150,11 @@ def main():
     if not records:
         raise SystemExit("no contour data; run extract_contours.py first")
 
+    for rec in records:
+        for key in ("O", "A", "P", "R"):
+            if rec.get(key):
+                rec[key] = pack_contours(rec[key])
+
     # Lightcurves live in their own files because they are produced by a
     # separate, much cheaper pass that does not need the DoL fit.
     lc = {}
@@ -174,9 +207,25 @@ def main():
     print(f"  detector panels attached to {sum(1 for r in records if 'D' in r)}"
           f"/{len(records)} bursts")
 
+    chan = {}
+    for path in glob.glob(os.path.join(CHSRC, "*.json")):
+        with open(path) as handle:
+            row = json.load(handle)
+        chan[row["t"]] = row
+    for rec in records:
+        row = chan.get(rec["t"])
+        if row is None:
+            continue
+        rec["C"] = {k: row[k] for k in ("lo", "hi", "nt", "nc", "sg", "sr",
+                                        "bd", "bs", "dets", "tot")}
+    print(f"  channel panels attached to {sum(1 for r in records if 'C' in r)}"
+          f"/{len(records)} bursts")
+
     # The display bands are the same for every burst, so they are stated once
     # in the caption rather than repeated 2,000 times in the data.
     all_dets = json.dumps(ALL_DETS)
+    ch_bands = json.dumps(CHAN_BANDS)
+    ch_emin, ch_emax = CHAN_EMIN, CHAN_EMAX
     any_det = next(iter(det.values()), None)
     nai_band = "8-900 keV"
     if any_det:
@@ -334,6 +383,10 @@ def main():
   @media (max-width:980px) {{ .detgrid {{ grid-template-columns:repeat(4,1fr); }} }}
   @media (max-width:620px) {{ .detgrid {{ grid-template-columns:repeat(3,1fr); }} }}
   @media (max-width:420px) {{ .detgrid {{ grid-template-columns:repeat(2,1fr); }} }}
+  /* Eight energy bands, so four columns rather than six: 6 + 2 leaves a
+     ragged second row. */
+  .detgrid.bands {{ grid-template-columns:repeat(4,1fr); }}
+  @media (max-width:620px) {{ .detgrid.bands {{ grid-template-columns:repeat(2,1fr); }} }}
   svg.dsvg {{ width:100%; height:auto; display:block;
     background:var(--surface-2,transparent); border-radius:5px; }}
   svg.dsvg text {{ font-family:var(--mono); fill:var(--muted); }}
@@ -344,6 +397,8 @@ def main():
   .detsplit {{ font-size:.72rem; color:var(--muted); margin:.7rem 0 .4rem;
     padding-top:.5rem; border-top:1px dashed var(--rule); }}
   .detaxis {{ margin-top:.55rem; font-family:var(--mono); font-size:.7rem; }}
+  svg.spec {{ width:100%; height:auto; display:block; margin-bottom:.2rem; }}
+  svg.spec text {{ font-family:var(--sans); fill:var(--muted); }}
 
   /* ---------------------------------------------------------- facts */
   .facts {{ background:var(--surface); border:1px solid var(--rule);
@@ -512,6 +567,20 @@ def main():
         </p>
         <div id="dets"></div>
       </div>
+
+      <div class="detwrap">
+        <p class="panelcap" style="max-width:78ch;margin-bottom:.7rem">
+          The same burst resolved in energy. A GRB is not static spectrally:
+          most decay hard to soft, pulses peak earlier at high energy than at
+          low, and a hard precursor can be invisible in the summed curve. The
+          map is shaded by significance above background,
+          (counts &minus; background) / &radic;background, rather than by raw
+          rate &mdash; the background falls by more than two orders of
+          magnitude from 8 to 900 keV, so a raw map would just be a picture
+          of the background with the burst lost in it.
+        </p>
+        <div id="chan"></div>
+      </div>
     </div>
 
     <div class="facts" id="facts"></div>
@@ -631,6 +700,7 @@ def main():
   function wrapNear(v, c) {{ return c + ((v - c + 180) % 360 + 360) % 360 - 180; }}
 
   function draw(r) {{
+    unpackContours(r);
     var COL = colors();
     var W = 440, H = 400, M = {{l: 52, r: 14, t: 14, b: 40}};
     var cx = r.oc[0], cy = r.oc[1];
@@ -762,6 +832,7 @@ def main():
   // no seam at RA 0, which is what breaks the left-hand panel for the 3% of
   // bursts whose region reaches a pole.
   function drawAzim(r) {{
+    unpackContours(r);
     var svg2 = document.getElementById('sky2');
     var COL = colors();
     var W = 440, H = 400, M = 26;
@@ -890,6 +961,27 @@ def main():
     var bin = atob(s), n = bin.length, out = new Uint8Array(n);
     for (var i = 0; i < n; i++) out[i] = bin.charCodeAt(i);
     return out;
+  }}
+
+  // Contour polygons arrive as base64 uint16 pairs on a 0.01 degree grid:
+  // RA directly, Dec offset by +90 so both fit unsigned. Expanded once per
+  // burst and cached on the record, since both sky panels draw the same
+  // polygons.
+  function unpackContours(r) {{
+    if (r.cu) return;
+    ['O', 'A', 'P', 'R'].forEach(function (k) {{
+      var src = r[k];
+      if (!src || !src.length) return;
+      r[k] = src.map(function (b64) {{
+        var u = b64bytes(b64), n = u.length >> 1, out = new Float64Array(n);
+        for (var i = 0; i < n; i++) {{
+          var v = u[2 * i] | (u[2 * i + 1] << 8);
+          out[i] = (i & 1) ? (v / 100 - 90) : (v / 100);
+        }}
+        return out;
+      }});
+    }});
+    r.cu = 1;
   }}
 
   function unpackLC(L) {{
@@ -1187,6 +1279,188 @@ def main():
     host.innerHTML = html;
   }}
 
+  // ------------------------------------------------- energy-resolved view
+  var CH_BANDS = {ch_bands};
+  var CH_EMIN = {ch_emin}, CH_EMAX = {ch_emax};
+
+  // Perceptual ramp for the spectrogram, near-black at zero significance so
+  // the quiet sky recedes. Interpolated through fixed stops rather than
+  // computed from channel formulae: a hand-rolled version had blue rise then
+  // drop at 30% of the scale, which put a false seam across the map and
+  // broke the one property a colour scale has to have, that brighter means
+  // more. Luminance here rises monotonically from 0.000 to 0.949.
+  var RAMP = [[0,0,4],[16,8,47],[51,5,91],[87,16,110],[120,28,109],
+              [154,41,98],[187,55,84],[217,74,63],[240,105,37],
+              [251,148,16],[252,255,164]];
+
+  function hot(f) {{
+    f = (f < 0 ? 0 : (f > 1 ? 1 : f)) * (RAMP.length - 1);
+    var i = Math.min(Math.floor(f), RAMP.length - 2), g = f - i;
+    var a = RAMP[i], b = RAMP[i + 1];
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * g) + ',' +
+                    Math.round(a[1] + (b[1] - a[1]) * g) + ',' +
+                    Math.round(a[2] + (b[2] - a[2]) * g) + ')';
+  }}
+
+  // Band curves get a soft-to-hard blue-to-red progression instead of the
+  // ramp above. No sub-range of a perceptual ramp reads well on both themes
+  // as a thin line -- its bright end scores 1.05 against white -- whereas
+  // these two endpoints are theme tokens already checked in both.
+  function mix(c1, c2, f) {{
+    function parse(h) {{
+      h = (h || '').trim();
+      return h.charAt(0) === '#' && h.length >= 7
+        ? [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16),
+           parseInt(h.substr(5, 2), 16)]
+        : null;
+    }}
+    var a = parse(c1), b = parse(c2);
+    if (!a || !b) return c1;
+    return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * f) + ',' +
+                    Math.round(a[1] + (b[1] - a[1]) * f) + ',' +
+                    Math.round(a[2] + (b[2] - a[2]) * f) + ')';
+  }}
+
+  function drawChan(r) {{
+    var host = document.getElementById('chan');
+    var C = r.C;
+    if (!C) {{
+      host.innerHTML = '<p class="panelcap">No TTE data for this burst.</p>';
+      return;
+    }}
+    var COL = colors();
+    var sg = b64bytes(C.sg), bd = b64bytes(C.bd);
+    var nt = C.nt, nc = C.nc, nb = CH_BANDS.length - 1;
+
+    // ---- spectrogram
+    var W = 960, H = 300, M = {{l: 58, r: 92, t: 12, b: 34}};
+    var iw = W - M.l - M.r, ih = H - M.t - M.b;
+    var cw = iw / nt, chh = ih / nc;
+    var out = ['<svg class="spec" viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
+      'aria-label="Time against energy, shaded by significance above background">'];
+    for (var c = 0; c < nc; c++) {{
+      // Row 0 is the lowest energy, drawn at the bottom.
+      var y = M.t + ih - (c + 1) * chh;
+      for (var i = 0; i < nt; i++) {{
+        var v = sg[c * nt + i];
+        if (v < 6) continue;                     // leave the panel ground showing
+        out.push('<rect x="' + (M.l + i * cw).toFixed(2) + '" y="' + y.toFixed(2) +
+          '" width="' + (cw + 0.6).toFixed(2) + '" height="' + (chh + 0.6).toFixed(2) +
+          '" fill="' + hot(v / 255) + '" />');
+      }}
+    }}
+    out.push('<rect class="frame" x="' + M.l + '" y="' + M.t + '" width="' + iw +
+             '" height="' + ih + '" />');
+
+    function tx(t) {{ return M.l + iw * (t - C.lo) / (C.hi - C.lo || 1); }}
+    if (r.L) {{
+      [[r.L.w90, '5,3'], [r.L.wsn, null]].forEach(function (p) {{
+        var a = tx(Math.max(p[0][0], C.lo)), b = tx(Math.min(p[0][1], C.hi));
+        if (b <= a) return;
+        out.push('<rect x="' + a.toFixed(1) + '" y="' + M.t + '" width="' +
+          (b - a).toFixed(1) + '" height="' + ih + '" fill="none" stroke="' +
+          COL.t90 + '" stroke-width="1.2"' +
+          (p[1] ? ' stroke-dasharray="' + p[1] + '"' : '') + ' />');
+      }});
+    }}
+
+    out.push('<g class="axis">');
+    for (var c = 0; c <= nc; c += 4) {{
+      var e = CH_EMIN * Math.pow(CH_EMAX / CH_EMIN, c / nc);
+      var Y = M.t + ih - c * chh;
+      out.push('<text x="' + (M.l - 7) + '" y="' + (Y + 3) + '" font-size="9" ' +
+               'text-anchor="end">' + (e < 100 ? e.toFixed(0) : Math.round(e / 10) * 10) + '</text>');
+    }}
+    var span = C.hi - C.lo;
+    for (var k = 0; k <= 4; k++) {{
+      var tv = C.lo + span * k / 4, X = M.l + iw * k / 4;
+      out.push('<text x="' + X.toFixed(1) + '" y="' + (M.t + ih + 14) +
+               '" font-size="9" text-anchor="middle">' +
+               (span > 40 ? tv.toFixed(0) : tv.toFixed(1)) + '</text>');
+    }}
+    out.push('<text x="' + (M.l + iw / 2) + '" y="' + (H - 4) +
+             '" font-size="9" text-anchor="middle">seconds from trigger</text>');
+    out.push('<text x="14" y="' + (M.t + ih / 2) + '" font-size="9" ' +
+             'text-anchor="middle" transform="rotate(-90 14 ' +
+             (M.t + ih / 2) + ')">keV</text>');
+    out.push('</g>');
+
+    // Colour key, as a strip of the same ramp.
+    var kx = M.l + iw + 20, kw = 13, steps = 40;
+    for (var s = 0; s < steps; s++) {{
+      out.push('<rect x="' + kx + '" y="' + (M.t + ih - (s + 1) * ih / steps).toFixed(2) +
+        '" width="' + kw + '" height="' + (ih / steps + 0.6).toFixed(2) +
+        '" fill="' + hot(s / (steps - 1)) + '" />');
+    }}
+    out.push('<rect class="frame" x="' + kx + '" y="' + M.t + '" width="' + kw +
+             '" height="' + ih + '" />');
+    out.push('<g class="axis">');
+    out.push('<text x="' + (kx + kw + 5) + '" y="' + (M.t + 8) + '" font-size="9">' +
+             C.sr[1].toFixed(1) + '</text>');
+    out.push('<text x="' + (kx + kw + 5) + '" y="' + (M.t + ih) + '" font-size="9">0</text>');
+    out.push('<text x="' + (kx + kw + 5) + '" y="' + (M.t + ih / 2) +
+             '" font-size="9">sigma</text>');
+    out.push('</g></svg>');
+    var html = out.join('');
+
+    // ---- band lightcurves
+    var BW = 150, BH = 76, BM = {{l: 3, r: 3, t: 13, b: 11}};
+    var biw = BW - BM.l - BM.r, bih = BH - BM.t - BM.b;
+    var cells = [];
+    for (var j = 0; j < nb; j++) {{
+      var g = ['<svg class="dsvg" viewBox="0 0 ' + BW + ' ' + BH + '" role="img" ' +
+        'aria-label="' + CH_BANDS[j] + ' to ' + CH_BANDS[j + 1] + ' keV, net ' +
+        C.tot[j] + ' counts">'];
+      function bx(t) {{ return BM.l + biw * (t - C.lo) / (C.hi - C.lo || 1); }}
+      if (r.L) {{
+        [[r.L.w90, 0.13], [r.L.wsn, 0.30]].forEach(function (p) {{
+          var a = bx(Math.max(p[0][0], C.lo)), b = bx(Math.min(p[0][1], C.hi));
+          if (b > a) g.push('<rect x="' + a.toFixed(1) + '" y="' + BM.t + '" width="' +
+            (b - a).toFixed(1) + '" height="' + bih + '" fill="' + COL.t90 +
+            '" fill-opacity="' + p[1] + '" />');
+        }});
+      }}
+      if (C.lo < 0 && C.hi > 0) {{
+        g.push('<line x1="' + bx(0).toFixed(1) + '" y1="' + BM.t + '" x2="' +
+          bx(0).toFixed(1) + '" y2="' + (BM.t + bih) + '" stroke="' + COL.muted +
+          '" stroke-width=".7" stroke-dasharray="2,2" stroke-opacity=".8" />');
+      }}
+      g.push('<rect class="frame" x="' + BM.l + '" y="' + BM.t + '" width="' + biw +
+             '" height="' + bih + '" />');
+      var d = '', bw = biw / nt;
+      for (var i = 0; i < nt; i++) {{
+        var yy = (BM.t + bih * (1 - bd[j * nt + i] / 255)).toFixed(1);
+        d += (i ? 'L' : 'M') + (BM.l + i * bw).toFixed(1) + ',' + yy +
+             'L' + (BM.l + (i + 1) * bw).toFixed(1) + ',' + yy;
+      }}
+      g.push('<path d="' + d + '" fill="none" stroke="' +
+             mix(COL.off, COL.peak, j / (nb - 1)) +
+             '" stroke-width="1" stroke-linejoin="round" />');
+      g.push('<text x="' + BM.l + '" y="9" font-size="8.5" class="dlab">' +
+             CH_BANDS[j] + '-' + CH_BANDS[j + 1] + ' keV</text>');
+      g.push('<text x="' + (BW - BM.r) + '" y="9" font-size="8.5" ' +
+             'text-anchor="end" class="dnet">' + C.tot[j].toLocaleString() + '</text>');
+      g.push('<text x="' + (BW - BM.r) + '" y="' + (BH - 2) + '" font-size="7.5" ' +
+             'text-anchor="end" class="dsc">' + Math.round(C.bs[j][0]) + '-' +
+             Math.round(C.bs[j][1]) + ' c/s</text>');
+      g.push('</svg>');
+      cells.push(g.join(''));
+    }}
+    html += '<div class="detsplit">The same counts split into eight bands. '
+         +  'Each band is scaled to its own range, unlike the detector panels '
+         +  'above &mdash; here the question is how the pulse SHAPE changes '
+         +  'with energy, and a shared scale would flatten the hard bands to '
+         +  'nothing, since 8-15 keV outcounts 600-900 keV many times over. '
+         +  'Soft bands are drawn blue, hard ones red. Figures are net counts '
+         +  'in T90, and the counts/s range each panel spans.</div>';
+    html += '<div class="detgrid bands">' + cells.join('') + '</div>';
+    html += '<p class="panelcap detaxis">summed over ' + C.dets.join(', ') +
+            ' &middot; ' + Math.round((C.hi - C.lo) / nt * 1000) + ' ms bins ' +
+            '&middot; 128 TTE channels rebinned to ' + nc + ' logarithmic ' +
+            'channels, which is still finer than the detectors resolve</p>';
+    host.innerHTML = html;
+  }}
+
   function show() {{
     var rec = current().filter(function (r) {{ return r.t === grbSel.value; }})[0];
     if (!rec) return;
@@ -1194,6 +1468,7 @@ def main():
     drawAzim(rec);
     drawLC(rec);
     drawDets(rec);
+    drawChan(rec);
     panel(rec);
   }}
 
