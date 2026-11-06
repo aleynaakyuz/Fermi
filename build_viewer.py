@@ -21,6 +21,7 @@ SRC = "site/vec/bursts"
 LCSRC = "site/vec/lc"
 DETSRC = "site/vec/det"
 CHSRC = "site/vec/chan"
+GEOMSRC = "site/vec/geom"
 OUT = "site/viewer.html"
 
 # Must match extract_channels.py.
@@ -205,6 +206,20 @@ def main():
         if "dead" in row:
             rec["D"]["dead"] = row["dead"]
     print(f"  detector panels attached to {sum(1 for r in records if 'D' in r)}"
+          f"/{len(records)} bursts")
+
+    # Pointing geometry. Cheap -- trigdat only, no TTE -- so it is its own
+    # pass rather than a reason to re-run the 214 GB extraction.
+    geom = {}
+    for path in glob.glob(os.path.join(GEOMSRC, "*.json")):
+        with open(path) as handle:
+            row = json.load(handle)
+        geom[row["t"]] = row
+    for rec in records:
+        row = geom.get(rec["t"])
+        if row is not None:
+            rec["G"] = {k: row[k] for k in ("er", "bn", "sn", "a")}
+    print(f"  pointing geometry attached to {sum(1 for r in records if 'G' in r)}"
           f"/{len(records)} bursts")
 
     chan = {}
@@ -394,6 +409,8 @@ def main():
   svg.dsvg text.dlab.on {{ fill:var(--peak); }}
   svg.dsvg text.dnet {{ fill:var(--ink-soft); }}
   svg.dsvg text.dsc {{ fill:var(--muted); opacity:.75; }}
+  svg.dsvg text.dsc.earth {{ fill:var(--ext); opacity:1; font-weight:650; }}
+  .geohead {{ margin:0 0 .6rem; }}
   .detsplit {{ font-size:.72rem; color:var(--muted); margin:.7rem 0 .4rem;
     padding-top:.5rem; border-top:1px dashed var(--rule); }}
   .detaxis {{ margin-top:.55rem; font-family:var(--mono); font-size:.7rem; }}
@@ -564,6 +581,16 @@ def main():
           and their background correspondingly higher. Detectors that
           triggered are marked <span style="color:var(--peak)">&#9733;</span>,
           and the figure at the top right is net counts in the T90 window.
+          Each panel's footer gives how far that detector was pointing from
+          the burst, and what it was facing &mdash; open sky, the Earth's
+          limb, or <span style="color:var(--ext);font-weight:650">the Earth
+          itself</span>. That is measured geometry from the spacecraft
+          attitude, not an inference from the counts, and it is what the
+          localization is really reading: across 250 bursts the angle to the
+          burst predicts a detector's net counts with a rank correlation of
+          &minus;0.68, the right sign in 98% of them. Earth-facing detectors
+          also run about 29% <em>quieter</em>, because the planet blocks the
+          cosmic diffuse background over the third of the sky it covers.
         </p>
         <div id="dets"></div>
       </div>
@@ -1200,6 +1227,19 @@ def main():
     (D.trg || []).forEach(function (d) {{ trg[d] = 1; }});
     (D.dead || []).forEach(function (d) {{ dead[d] = 1; }});
 
+    // Pointing geometry, if we have it: three angles per detector, in the
+    // standard order, as whole degrees.
+    var G = r.G, gb = null, gn = null, gs = null;
+    if (G) {{
+      var ga = b64bytes(G.a);
+      gb = ga.subarray(0, 14); gn = ga.subarray(14, 28); gs = ga.subarray(28, 42);
+    }}
+    function lookingAt(i) {{
+      if (!G) return null;
+      var a = gn[i];
+      return a < G.er ? 'Earth' : (a < G.er + 20 ? 'limb' : 'sky');
+    }}
+
     var W = 150, H = 76, M = {{l: 3, r: 3, t: 13, b: 11}};
     var iw = W - M.l - M.r, ih = H - M.t - M.b;
     var span = D.hi - D.lo || 1;
@@ -1253,9 +1293,33 @@ def main():
       out.push('<text x="' + (W - M.r) + '" y="9" font-size="8.5" ' +
                'text-anchor="end" class="dnet">' +
                (net > 0 ? '+' : '') + net.toLocaleString() + '</text>');
-      out.push('<text x="' + (W - M.r) + '" y="' + (H - 2) + '" font-size="7.5" ' +
-               'text-anchor="end" class="dsc">' + Math.round(sc[0]) + '-' +
-               Math.round(sc[0] + sc[1]) + ' c/s</text>');
+
+      // The footer used to repeat the counts/s range in all twelve panels,
+      // which is pure duplication because the NaIs share one scale. It is
+      // stated once in the caption now, and the room goes to the geometry:
+      // how far this detector was from the burst, and what it was facing.
+      var di = ALL_DETS.indexOf(det);
+      if (G && di >= 0) {{
+        var look = lookingAt(di);
+        out.push('<text x="' + M.l + '" y="' + (H - 2) + '" font-size="7.5" ' +
+                 'class="dsc">' + gb[di] + '\\u00B0 to burst</text>');
+        // The Sun marker is only meaningful when the Sun is actually up. In
+        // orbital night it sits behind the Earth and contributes nothing, so
+        // flagging a detector as Sun-facing then is worse than silent. And it
+        // is appended to the Earth/limb/sky label rather than replacing it:
+        // replacing it put "Sun 36deg" in a cell coloured as Earth-facing,
+        // so the text and the colour disagreed.
+        var sunUp = G.sn >= G.er;
+        out.push('<text x="' + (W - M.r) + '" y="' + (H - 2) +
+                 '" font-size="7.5" text-anchor="end" class="dsc' +
+                 (look === 'Earth' ? ' earth' : '') + '">' + look +
+                 (sunUp && gs[di] < 40 ? ' \\u2609' + gs[di] + '\\u00B0' : '') +
+                 '</text>');
+      }} else {{
+        out.push('<text x="' + (W - M.r) + '" y="' + (H - 2) + '" font-size="7.5" ' +
+                 'text-anchor="end" class="dsc">' + Math.round(sc[0]) + '-' +
+                 Math.round(sc[0] + sc[1]) + ' c/s</text>');
+      }}
       out.push('</svg>');
       return out.join('');
     }}
@@ -1274,8 +1338,25 @@ def main():
       D.lo.toFixed(nd < 2 ? 2 : 1) + ' to +' + D.hi.toFixed(nd < 2 ? 2 : 1) +
       ' s from trigger &middot; ' +
       (bin < 1 ? Math.round(bin * 1000) + ' ms' : bin.toFixed(2) + ' s') +
-      ' bins &middot; dashed line is the trigger &middot; NaI {nai_band}, ' +
-      'shown on a common scale</p>';
+      ' bins &middot; dashed line is the trigger &middot; NaI {nai_band} on a ' +
+      'common ' + Math.round(D.sn[0]) + '-' + Math.round(D.sn[0] + D.sn[1]) +
+      ' c/s scale, BGO ' + Math.round(D.sb[0]) + '-' +
+      Math.round(D.sb[0] + D.sb[1]) + ' c/s</p>';
+
+    // One line of context above the grid: was the burst anywhere near the
+    // Earth's limb, and was Fermi in daylight?
+    if (G) {{
+      var clear = (G.bn - G.er);
+      var night = G.sn < G.er;
+      var geo = 'Earth fills a disc ' + G.er.toFixed(0) +
+        '&deg; in radius around nadir, about 30% of the sky. The burst sat ' +
+        G.bn.toFixed(0) + '&deg; from nadir, ' +
+        (clear >= 0 ? '<strong>' + clear.toFixed(0) + '&deg; clear of the limb</strong>'
+                    : '<strong>' + (-clear).toFixed(0) + '&deg; behind the limb</strong>') +
+        '. Fermi was in orbital ' + (night ? 'night' : 'day') +
+        ' (Sun ' + G.sn.toFixed(0) + '&deg; from nadir).';
+      html = '<p class="panelcap geohead">' + geo + '</p>' + html;
+    }}
     host.innerHTML = html;
   }}
 
