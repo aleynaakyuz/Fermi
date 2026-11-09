@@ -37,6 +37,9 @@ PAGES = [
     ("external.html", "external.html", "Cross-mission localizations",
      "The 969 GBM bursts carrying a position from Swift, the Fermi LAT, or "
      "another instrument."),
+    ("saa.html", "saa.html", "Background from the SAA",
+     "Three weeks of continuous data and 189 South Atlantic Anomaly "
+     "passages: how the activation decays, and how hard it is."),
     ("index.html", "replication.html", "DoL replication report",
      "The original ten-burst study: can the legacy grid search reproduce "
      "GBM's own positions, and what closes the gap."),
