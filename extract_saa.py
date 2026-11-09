@@ -77,7 +77,13 @@ def read_ctime(day, det):
         eb = handle["EBOUNDS"].data
         edges = np.append(np.asarray(eb["E_MIN"], float),
                           float(eb["E_MAX"][-1]))
-    good = expo > 0.1
+    # Any row with positive exposure is usable, because the rate is
+    # counts/exposure and both scale together. An absolute threshold is a
+    # trap here: CTIME drops from 0.256 s to 64 ms bins during trigger
+    # intervals, exactly as trigdat does, so a cut at 0.1 s silently threw
+    # away 84,070 of 356,298 rows on 2022-08-27 -- 24% of the day, and
+    # precisely the parts around bursts.
+    good = expo > 0.0
     return (0.5 * (t0 + t1))[good], counts[good], expo[good], edges
 
 
@@ -196,11 +202,26 @@ def example_day(day, det, step=10.0):
     e = np.bincount(b, weights=expo, minlength=nb)
     rate = np.where(e > 1.0, c / np.maximum(e, 1e-9), np.nan)
     hours = (np.arange(nb) * step + step / 2) / 3600.0
-    keep = np.isfinite(rate)
+    keep = np.flatnonzero(np.isfinite(rate))
+
+    # Mark the gaps rather than closing over them. Dropping empty bins left
+    # the series with no break, so the renderer drew a straight line across
+    # every SAA passage while the caption claimed the trace was interrupted.
+    # A single null between non-adjacent samples lifts the pen and costs
+    # nothing: nine nulls for a day.
+    ts, rs = [], []
+    prev = None
+    for i in keep:
+        if prev is not None and i - prev > 1:
+            ts.append(round(float((hours[prev] + hours[i]) / 2), 4))
+            rs.append(None)
+        ts.append(round(float(hours[i]), 4))
+        rs.append(int(round(float(rate[i]))))
+        prev = i
+
     return {
         "det": det, "day": day, "step": step,
-        "t": [round(float(v), 4) for v in hours[keep]],
-        "r": [int(round(float(v))) for v in rate[keep]],
+        "t": ts, "r": rs,
         "saa": [[round((a - t0) / 3600.0, 4), round((b2 - t0) / 3600.0, 4)]
                 for a, b2 in spans],
         "exits": [round(float(x - t0) / 3600.0, 4) for x in exits],

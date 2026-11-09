@@ -85,7 +85,10 @@ def chart_day(day):
     iw, ih = W - M["l"] - M["r"], H - M["t"] - M["b"]
     xs, ys = day["t"], day["r"]
     x0, x1 = 0.0, max(xs)
-    lo, hi = min(ys), max(ys)
+    # ys carries a None at each SAA break, so the pen lifts; skip those when
+    # working out the range.
+    finite = [v for v in ys if v is not None]
+    lo, hi = min(finite), max(finite)
     pad = (hi - lo) * 0.08 or 1
     y0, y1 = max(0, lo - pad), hi + pad
     px = lambda v: M["l"] + iw * (v - x0) / (x1 - x0 or 1)
@@ -270,6 +273,11 @@ def main():
             f'<td class="n">{excess(10,20)}</td></tr>')
     chan_rows = "".join(chan_rows)
 
+    day = data["day"]
+    breaks = sum(1 for v in day["r"] if v is None)
+    n_saa = len(day["saa"])
+    covered = sum(1 for v in day["r"] if v is not None) * day["step"] / 3600.0
+
     built = datetime.date.today().isoformat()
     html = f"""<title>SAA Background in Fermi GBM</title>
 <style>
@@ -379,10 +387,12 @@ def main():
 <div class="card">
   {chart_day(data['day'])}
   <p class="cap">Detector {data['day']['det']} across {data['day']['day']},
-    binned to {data['day']['step']:.0f} s. Shaded bands are SAA passages: the
-    gaps in the trace are real, because the detectors are off. Each restart
-    is followed by a spike that decays within minutes. The slower rise and
-    fall underneath is orbital.</p>
+    binned to {data['day']['step']:.0f} s. Shaded bands are SAA passages, and
+    the trace genuinely stops inside each one because the detectors are
+    switched off &mdash; {breaks} breaks for {n_saa} passages, leaving
+    {covered:.1f} of the 24 hours with data. Each restart is followed by a
+    spike that decays within minutes. The slower rise and fall underneath is
+    orbital.</p>
 </div>
 
 <h2>Stacked on the moment of exit</h2>
