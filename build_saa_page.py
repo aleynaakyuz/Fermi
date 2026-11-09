@@ -235,6 +235,68 @@ def chart_chan(chan, t):
     return "".join(s)
 
 
+def chan_colour(frac):
+    """Soft blue to hard red, matching the viewer's band colours."""
+    return f"rgb({int(47+170*frac)},{int(111-28*frac)},{int(208-129*frac)})"
+
+
+def grid_panel(det, rows, t, y0, y1, W=236, H=150):
+    """One small multiple: every energy channel of one detector."""
+    M = dict(l=34, r=6, t=16, b=22)
+    iw, ih = W - M["l"] - M["r"], H - M["t"] - M["b"]
+    px = lambda v: M["l"] + iw * v / (max(t) or 1)
+    py = lambda v: M["t"] + ih * (y1 - v) / (y1 - y0 or 1)
+    s = [f'<svg class="mini" viewBox="0 0 {W} {H}" role="img" '
+         f'aria-label="Detector {det}, excess after an SAA exit by energy">']
+    s.append(f'<rect class="frame" x="{M["l"]}" y="{M["t"]}" width="{iw}" '
+             f'height="{ih}" />')
+    s.append('<g class="axis">')
+    for v in (0, 30, 60, 90):
+        if v > max(t):
+            continue
+        s.append(f'<line x1="{px(v):.1f}" y1="{M["t"]}" x2="{px(v):.1f}" '
+                 f'y2="{M["t"]+ih}"/>')
+        s.append(f'<text x="{px(v):.1f}" y="{M["t"]+ih+12}" '
+                 f'text-anchor="middle">{v}</text>')
+    for v in axis_ticks(y0, y1, 3):
+        if not (y0 <= v <= y1):
+            continue
+        s.append(f'<line x1="{M["l"]}" y1="{py(v):.1f}" x2="{M["l"]+iw}" '
+                 f'y2="{py(v):.1f}"/>')
+        s.append(f'<text x="{M["l"]-5}" y="{py(v)+3:.1f}" text-anchor="end">'
+                 f'{v:g}</text>')
+    s.append('</g>')
+    if y0 < 1.0 < y1:
+        s.append(f'<line class="unity" x1="{M["l"]}" y1="{py(1.0):.1f}" '
+                 f'x2="{M["l"]+iw}" y2="{py(1.0):.1f}" />')
+    for i, row in enumerate(rows):
+        frac = i / max(len(rows) - 1, 1)
+        s.append(f'<path class="line thin" style="stroke:{chan_colour(frac)}" '
+                 f'd="{path_from(t, row["rel"], px, py)}" />')
+    s.append(f'<text class="minilab" x="{M["l"]}" y="11">{det}</text>')
+    s.append(f'<text class="minisub" x="{W-M["r"]}" y="11" text-anchor="end">'
+             f'{rows[0]["lo"]:g}&#8211;{rows[-1]["hi"]:g} keV</text>')
+    s.append('</svg>')
+    return "".join(s)
+
+
+def chan_legend(rows, width=980):
+    """Shared key for the grid: which colour is which energy."""
+    s = [f'<svg class="key" viewBox="0 0 {width} 26" role="img" '
+         f'aria-label="Energy channel colour key">']
+    x = 4
+    for i, row in enumerate(rows):
+        frac = i / max(len(rows) - 1, 1)
+        s.append(f'<line x1="{x}" y1="13" x2="{x+20}" y2="13" '
+                 f'style="stroke:{chan_colour(frac)};stroke-width:2.4" />')
+        label = f'{row["lo"]:g}-{row["hi"]:g}'
+        s.append(f'<text x="{x+25}" y="16">{label}</text>')
+        x += 32 + 6.1 * len(label)
+    s.append(f'<text x="{min(x+6, width-4)}" y="16">keV</text>')
+    s.append('</svg>')
+    return "".join(s)
+
+
 def main():
     with open(SRC) as handle:
         data = json.load(handle)
@@ -272,6 +334,27 @@ def main():
             f'<td class="n">{excess(2,5)}</td>'
             f'<td class="n">{excess(10,20)}</td></tr>')
     chan_rows = "".join(chan_rows)
+
+    # The all-detector grid. One shared vertical scale across the twelve NaI
+    # so panels can be compared at a glance; the BGOs get their own, because
+    # their excess is roughly twice as large and would flatten the rest.
+    chan_all = data.get("chan_all") or {}
+
+    def span(dets):
+        vals = [v for d in dets for row in chan_all.get(d, [])
+                for v in row["rel"] if v is not None]
+        if not vals:
+            return 0.9, 1.1
+        return min(vals) - 0.02, max(vals) + 0.02
+
+    nai_lo, nai_hi = span(NAI)
+    bgo_lo, bgo_hi = span(BGO)
+    grid_nai = "".join(grid_panel(d, chan_all[d], data["t"], nai_lo, nai_hi)
+                       for d in NAI if d in chan_all)
+    grid_bgo = "".join(grid_panel(d, chan_all[d], data["t"], bgo_lo, bgo_hi)
+                       for d in BGO if d in chan_all)
+    nai_key = chan_legend(chan_all[NAI[0]]) if NAI[0] in chan_all else ""
+    bgo_key = chan_legend(chan_all[BGO[0]]) if BGO[0] in chan_all else ""
 
     day = data["day"]
     breaks = sum(1 for v in day["r"] if v is None)
@@ -329,6 +412,22 @@ def main():
   svg.fig .serieslab {{ font-family:var(--mono); font-size:9.5px; }}
   .cap {{ font-size:.78rem; color:var(--muted); font-family:var(--sans);
     margin:.5rem 0 0; max-width:86ch; }}
+  .grid {{ display:grid; gap:.4rem;
+    grid-template-columns:repeat(4,1fr); }}
+  @media (max-width:860px) {{ .grid {{ grid-template-columns:repeat(3,1fr); }} }}
+  @media (max-width:620px) {{ .grid {{ grid-template-columns:repeat(2,1fr); }} }}
+  svg.mini {{ width:100%; height:auto; display:block; }}
+  svg.mini text {{ font-family:var(--sans); font-size:8.5px; fill:var(--muted); }}
+  svg.mini .frame {{ fill:none; stroke:var(--rule); stroke-width:1; }}
+  svg.mini .axis line {{ stroke:var(--grid); stroke-width:.5; }}
+  svg.mini .line.thin {{ fill:none; stroke-width:1; stroke-linejoin:round; }}
+  svg.mini .unity {{ stroke:var(--muted); stroke-width:.8;
+    stroke-dasharray:3,2; opacity:.7; }}
+  svg.mini .minilab {{ font-family:var(--mono); font-size:10px;
+    font-weight:650; fill:var(--ink); }}
+  svg.mini .minisub {{ font-size:8px; opacity:.8; }}
+  svg.key {{ width:100%; height:auto; display:block; margin:0 0 .5rem; }}
+  svg.key text {{ font-family:var(--mono); font-size:9px; fill:var(--muted); }}
   table {{ border-collapse:collapse; font-family:var(--sans);
     font-size:.86rem; width:100%; }}
   th, td {{ padding:.34rem .6rem; border-bottom:1px solid var(--rule);
@@ -436,6 +535,28 @@ def main():
   {chan_rows}
 </table>
   <p class="cap">Excess over each channel's own quiet level.</p>
+</div>
+
+<h2>Every detector, every energy range</h2>
+<p>The same fold repeated for all fourteen detectors and all eight CTIME
+  channels. The twelve NaI share one vertical scale so they can be compared
+  directly; the BGOs are on their own, because their excess is roughly twice
+  as large and would flatten everything else. Nothing is drawn for the time
+  Fermi spends inside the SAA: the detectors are off, so there is no
+  measurement to show.</p>
+<div class="card">
+  {nai_key}
+  <div class="grid">{grid_nai}</div>
+  <p class="cap">Twelve NaI. Each curve is one energy channel divided by its
+    own quiet level, against minutes since the SAA exit. The dashed line is
+    that quiet level. The ordering is consistent everywhere: the hard
+    channels sit above the soft ones throughout the decay.</p>
+</div>
+<div class="card">
+  {bgo_key}
+  <div class="grid">{grid_bgo}</div>
+  <p class="cap">The two BGOs, on their own scale and with their own channel
+    boundaries, which run to 40 MeV rather than 2 MeV.</p>
 </div>
 
 <h2>Fitted decay</h2>

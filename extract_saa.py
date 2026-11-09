@@ -90,7 +90,7 @@ def read_ctime(day, det):
 #   Per fold bin, keep at most this many samples before taking the median.
 #   About 22,000 land in each bin over 21 days, so this barely subsamples.
 MAX_SAMPLES = 20000
-MAX_SAMPLES_CHAN = 5000
+MAX_SAMPLES_CHAN = 3000
 
 
 def fold_one(args):
@@ -111,7 +111,7 @@ def fold_one(args):
     buckets = [[] for _ in range(nb)]
     chan_buckets = None
     ebounds = None
-    want_chan = det == CHAN_DET
+    want_chan = True
 
     for day in days:
         exits, _ = saa_exits(day)
@@ -253,7 +253,7 @@ def main():
         "days": len(days), "exits": n_exits,
         "first": days[0], "last": days[-1],
         "t": [round(float(v), 2) for v in centres],
-        "fold": {}, "fit": {}, "chan": None, "day": None,
+        "fold": {}, "fit": {}, "chan": None, "chan_all": {}, "day": None,
     }
     quiet = (centres >= BASE_LO) & (centres < BASE_HI)
     for det, got in folded.items():
@@ -269,7 +269,7 @@ def main():
             fit["base_quiet"] = round(float(base), 1)
             out["fit"][det] = fit
 
-        if det == CHAN_DET and got.get("chan"):
+        if got.get("chan"):
             eb = got["ebounds"]
             rows = []
             for c, series in enumerate(got["chan"]):
@@ -284,7 +284,12 @@ def main():
                     "rel": [None if not np.isfinite(v) or base <= 0
                             else round(float(v / base), 4) for v in r],
                 })
-            out["chan"] = {"det": det, "rows": rows}
+            # Every detector, so the grid can show all fourteen. The BGOs
+            # carry quite different channel edges from the NaIs, which is why
+            # the boundaries travel with each detector rather than once.
+            out["chan_all"][det] = rows
+            if det == CHAN_DET:
+                out["chan"] = {"det": det, "rows": rows}
 
     day = EXAMPLE_DAY if EXAMPLE_DAY in days else days[len(days) // 2]
     out["day"] = example_day(day, CHAN_DET)
