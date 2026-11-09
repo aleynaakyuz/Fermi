@@ -30,6 +30,104 @@ CHAN_BANDS = [8, 15, 25, 50, 100, 200, 350, 600, 900]
 
 ALL_DETS = [f"n{d}" for d in "0123456789ab"] + ["b0", "b1"]
 
+
+def detector_key_svg():
+    """An annotated, blown-up detector panel: a key to its own notation.
+
+    The panel carries six separate annotations in 7.5 px type tucked into its
+    corners. Describing them in a paragraph underneath made a wall of prose
+    that nobody reads against a figure nobody can decode. A labelled example
+    at four times the size, with leader lines, says the same thing at a
+    glance.
+    """
+    import math
+    W, H = 840, 368
+    px0, py0, pw, ph = 290, 96, 260, 136
+
+    # A plausible curve: flat background, one asymmetric pulse, slight noise.
+    pts, n = [], 64
+    for i in range(n):
+        x = i / (n - 1)
+        burst = math.exp(-((x - 0.52) / 0.055) ** 2) * 0.74
+        if x > 0.52:
+            burst = max(burst, 0.74 * math.exp(-(x - 0.52) / 0.09))
+        wobble = 0.035 * math.sin(i * 1.9) + 0.022 * math.sin(i * 0.7 + 1)
+        pts.append(min(0.97, 0.20 + burst + wobble))
+    step = ""
+    for i, v in enumerate(pts):
+        xa = px0 + pw * i / n
+        xb = px0 + pw * (i + 1) / n
+        y = py0 + ph * (1 - v)
+        step += f"{'L' if i else 'M'}{xa:.1f},{y:.1f}L{xb:.1f},{y:.1f}"
+
+    t0 = px0 + pw * 0.30                      # trigger instant
+    sn0, sn1 = px0 + pw * 0.44, px0 + pw * 0.66   # best-S/N window
+    t90a, t90b = px0 + pw * 0.36, px0 + pw * 0.80  # full T90
+
+    def lead(x1, y1, x2, y2):
+        return (f'<path class="dgm-lead" d="M{x1},{y1}L{x2},{y2}" />'
+                f'<circle class="dgm-dot" cx="{x2}" cy="{y2}" r="2.4" />')
+
+    def label(x, y, anchor, lines, cls=""):
+        out = []
+        for k, text in enumerate(lines):
+            out.append(f'<text class="dgm-lab {cls}" x="{x}" y="{y + k * 15}" '
+                       f'text-anchor="{anchor}">{text}</text>')
+        return "".join(out)
+
+    s = [f'<svg class="dgm" viewBox="0 0 {W} {H}" role="img" '
+         f'aria-label="Annotated guide to one detector panel">']
+
+    # the example panel
+    s.append(f'<rect class="dgm-band t90" x="{t90a}" y="{py0}" '
+             f'width="{t90b - t90a}" height="{ph}" />')
+    s.append(f'<rect class="dgm-band sn" x="{sn0}" y="{py0}" '
+             f'width="{sn1 - sn0}" height="{ph}" />')
+    s.append(f'<line class="dgm-trig" x1="{t0}" y1="{py0}" x2="{t0}" '
+             f'y2="{py0 + ph}" />')
+    s.append(f'<path class="dgm-curve" d="{step}" />')
+    s.append(f'<rect class="dgm-frame" x="{px0}" y="{py0}" width="{pw}" '
+             f'height="{ph}" />')
+    s.append(f'<text class="dgm-det" x="{px0 + 7}" y="{py0 + 17}">n7</text>')
+    s.append(f'<text class="dgm-star" x="{px0 + 27}" y="{py0 + 17}">&#9733;</text>')
+    s.append(f'<text class="dgm-net" x="{px0 + pw - 7}" y="{py0 + 17}" '
+             f'text-anchor="end">+1,033</text>')
+    s.append(f'<text class="dgm-foot" x="{px0 + 7}" y="{py0 + ph - 7}">'
+             f'26&#176; to burst</text>')
+    s.append(f'<text class="dgm-foot" x="{px0 + pw - 7}" y="{py0 + ph - 7}" '
+             f'text-anchor="end">sky</text>')
+
+    # callouts
+    s.append(lead(276, 108, px0 + 22, py0 + 12))
+    s.append(label(268, 104, "end",
+                   ["the detector, and a star", "if it was one that triggered"]))
+    s.append(lead(276, 180, px0 + 42, py0 + 70))
+    s.append(label(268, 176, "end",
+                   ["shaded: the full T90 span,", "and the brighter best-S/N",
+                    "window actually fitted"]))
+    s.append(lead(276, 252, px0 + 30, py0 + ph - 12))
+    s.append(label(268, 248, "end",
+                   ["how far this detector was", "from the burst &#8212; smaller",
+                    "means it saw more"]))
+
+    s.append(lead(564, 108, px0 + pw - 30, py0 + 12))
+    s.append(label(572, 104, "start",
+                   ["net counts inside T90,", "background subtracted"]))
+    s.append(lead(564, 180, px0 + pw - 14, py0 + 60))
+    s.append(label(572, 176, "start",
+                   ["all twelve NaI share one", "vertical scale &#8212; comparing",
+                    "them IS the localization"]))
+    s.append(lead(564, 252, px0 + pw - 20, py0 + ph - 12))
+    s.append(label(572, 248, "start",
+                   ["what it faced: sky, limb,",
+                    "or <tspan class=\"dgm-earth\">Earth</tspan>. A sun sign",
+                    "marks the Sun when it is up"]))
+
+    s.append(lead(t0, 318, t0, py0 + ph + 6))
+    s.append(label(t0, 336, "middle", ["the dashed line is the trigger instant"]))
+    s.append('</svg>')
+    return "".join(s)
+
 # Per-burst annotations, shown in the panel when that burst is selected.
 # Only for bursts where something about the event itself explains the result.
 BURST_NOTES = {
@@ -239,6 +337,7 @@ def main():
     # The display bands are the same for every burst, so they are stated once
     # in the caption rather than repeated 2,000 times in the data.
     all_dets = json.dumps(ALL_DETS)
+    detector_key = detector_key_svg()
     ch_bands = json.dumps(CHAN_BANDS)
     ch_emin, ch_emax = CHAN_EMIN, CHAN_EMAX
     any_det = next(iter(det.values()), None)
@@ -411,6 +510,40 @@ def main():
   svg.dsvg text.dsc {{ fill:var(--muted); opacity:.75; }}
   svg.dsvg text.dsc.earth {{ fill:var(--ext); opacity:1; font-weight:650; }}
   .geohead {{ margin:0 0 .6rem; }}
+
+  /* ------------------------------------------- annotated panel key */
+  .keybox {{ margin:.5rem 0 1rem; border:1px solid var(--rule);
+    border-radius:10px; padding:.5rem .9rem .3rem; background:var(--surface); }}
+  .keybox > summary {{ cursor:pointer; font-size:.78rem; font-weight:650;
+    color:var(--ink-soft); list-style:none; padding:.2rem 0; }}
+  .keybox > summary::-webkit-details-marker {{ display:none; }}
+  .keybox > summary::before {{ content:"\\25BE  "; color:var(--muted); }}
+  .keybox:not([open]) > summary::before {{ content:"\\25B8  "; }}
+  /* The body is wrapped so that closing the box actually closes it. The
+     browser hides a closed details' non-summary children, but `svg.dgm` sets
+     display:block, which overrode that and left the diagram on screen with
+     the toggle looking broken. The wrapper has no display of its own. */
+  .keybox:not([open]) .keybody {{ display:none; }}
+  svg.dgm {{ width:100%; height:auto; display:block; margin:.3rem 0 .2rem;
+    max-width:860px; }}
+  svg.dgm text {{ font-family:var(--sans); font-size:12px; fill:var(--ink-soft); }}
+  svg.dgm .dgm-lab {{ fill:var(--ink-soft); }}
+  svg.dgm .dgm-earth {{ fill:var(--ext); font-weight:650; }}
+  svg.dgm .dgm-lead {{ stroke:var(--muted); stroke-width:1; fill:none;
+    stroke-dasharray:3,3; opacity:.8; }}
+  svg.dgm .dgm-dot {{ fill:var(--muted); }}
+  svg.dgm .dgm-frame {{ fill:none; stroke:var(--rule); stroke-width:1; }}
+  svg.dgm .dgm-curve {{ fill:none; stroke:var(--accent); stroke-width:1.6;
+    stroke-linejoin:round; }}
+  svg.dgm .dgm-band.t90 {{ fill:var(--t90); fill-opacity:.13; }}
+  svg.dgm .dgm-band.sn {{ fill:var(--t90); fill-opacity:.30; }}
+  svg.dgm .dgm-trig {{ stroke:var(--muted); stroke-width:1.1;
+    stroke-dasharray:3,3; }}
+  svg.dgm .dgm-det {{ font-family:var(--mono); font-size:14px;
+    font-weight:650; fill:var(--ink); }}
+  svg.dgm .dgm-star {{ font-size:13px; fill:var(--peak); }}
+  svg.dgm .dgm-net {{ font-family:var(--mono); font-size:13px; fill:var(--ink-soft); }}
+  svg.dgm .dgm-foot {{ font-family:var(--mono); font-size:11.5px; fill:var(--muted); }}
   .detsplit {{ font-size:.72rem; color:var(--muted); margin:.7rem 0 .4rem;
     padding-top:.5rem; border-top:1px dashed var(--rule); }}
   .detaxis {{ margin-top:.55rem; font-family:var(--mono); font-size:.7rem; }}
@@ -570,28 +703,28 @@ def main():
       </div>
 
       <div class="detwrap">
-        <p class="panelcap" style="max-width:78ch;margin-bottom:.7rem">
+        <p class="panelcap" style="max-width:78ch;margin-bottom:.2rem">
           Each detector on its own, from TTE. GBM has no optics &mdash; it
           works out where a burst was purely by comparing how much each
-          detector saw, so this is the fit's actual input. All twelve NaI
-          panels share one vertical scale, printed at the lower right of each,
-          because the comparison <em>between</em> them is the whole signal;
-          scaling each to its own peak would make every detector look alike.
-          The two BGOs are scaled separately, since their band is far wider
-          and their background correspondingly higher. Detectors that
-          triggered are marked <span style="color:var(--peak)">&#9733;</span>,
-          and the figure at the top right is net counts in the T90 window.
-          Each panel's footer gives how far that detector was pointing from
-          the burst, and what it was facing &mdash; open sky, the Earth's
-          limb, or <span style="color:var(--ext);font-weight:650">the Earth
-          itself</span>. That is measured geometry from the spacecraft
-          attitude, not an inference from the counts, and it is what the
-          localization is really reading: across 250 bursts the angle to the
-          burst predicts a detector's net counts with a rank correlation of
-          &minus;0.68, the right sign in 98% of them. Earth-facing detectors
-          also run about 29% <em>quieter</em>, because the planet blocks the
-          cosmic diffuse background over the third of the sky it covers.
+          detector saw, so these fourteen panels are the fit's actual input.
         </p>
+        <details class="keybox" open>
+          <summary>How to read one of these panels</summary>
+          <div class="keybody">
+          {detector_key}
+          <p class="panelcap" style="max-width:78ch">
+            The pointing figures are measured geometry from the spacecraft
+            attitude, not inferred from the counts &mdash; and they are what
+            the localization is really reading. Across 250 bursts the angle to
+            the burst predicts a detector's net counts with a rank correlation
+            of &minus;0.68, the right sign in 98% of them. Earth-facing
+            detectors also run about 29% <em>quieter</em>, because the planet
+            blocks the cosmic diffuse background over the third of the sky it
+            covers. The two BGOs are scaled separately from the NaI, their
+            band being far wider and their background correspondingly higher.
+          </p>
+          </div>
+        </details>
         <div id="dets"></div>
       </div>
 

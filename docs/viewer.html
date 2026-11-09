@@ -138,6 +138,40 @@
   svg.dsvg text.dsc { fill:var(--muted); opacity:.75; }
   svg.dsvg text.dsc.earth { fill:var(--ext); opacity:1; font-weight:650; }
   .geohead { margin:0 0 .6rem; }
+
+  /* ------------------------------------------- annotated panel key */
+  .keybox { margin:.5rem 0 1rem; border:1px solid var(--rule);
+    border-radius:10px; padding:.5rem .9rem .3rem; background:var(--surface); }
+  .keybox > summary { cursor:pointer; font-size:.78rem; font-weight:650;
+    color:var(--ink-soft); list-style:none; padding:.2rem 0; }
+  .keybox > summary::-webkit-details-marker { display:none; }
+  .keybox > summary::before { content:"\25BE  "; color:var(--muted); }
+  .keybox:not([open]) > summary::before { content:"\25B8  "; }
+  /* The body is wrapped so that closing the box actually closes it. The
+     browser hides a closed details' non-summary children, but `svg.dgm` sets
+     display:block, which overrode that and left the diagram on screen with
+     the toggle looking broken. The wrapper has no display of its own. */
+  .keybox:not([open]) .keybody { display:none; }
+  svg.dgm { width:100%; height:auto; display:block; margin:.3rem 0 .2rem;
+    max-width:860px; }
+  svg.dgm text { font-family:var(--sans); font-size:12px; fill:var(--ink-soft); }
+  svg.dgm .dgm-lab { fill:var(--ink-soft); }
+  svg.dgm .dgm-earth { fill:var(--ext); font-weight:650; }
+  svg.dgm .dgm-lead { stroke:var(--muted); stroke-width:1; fill:none;
+    stroke-dasharray:3,3; opacity:.8; }
+  svg.dgm .dgm-dot { fill:var(--muted); }
+  svg.dgm .dgm-frame { fill:none; stroke:var(--rule); stroke-width:1; }
+  svg.dgm .dgm-curve { fill:none; stroke:var(--accent); stroke-width:1.6;
+    stroke-linejoin:round; }
+  svg.dgm .dgm-band.t90 { fill:var(--t90); fill-opacity:.13; }
+  svg.dgm .dgm-band.sn { fill:var(--t90); fill-opacity:.30; }
+  svg.dgm .dgm-trig { stroke:var(--muted); stroke-width:1.1;
+    stroke-dasharray:3,3; }
+  svg.dgm .dgm-det { font-family:var(--mono); font-size:14px;
+    font-weight:650; fill:var(--ink); }
+  svg.dgm .dgm-star { font-size:13px; fill:var(--peak); }
+  svg.dgm .dgm-net { font-family:var(--mono); font-size:13px; fill:var(--ink-soft); }
+  svg.dgm .dgm-foot { font-family:var(--mono); font-size:11.5px; fill:var(--muted); }
   .detsplit { font-size:.72rem; color:var(--muted); margin:.7rem 0 .4rem;
     padding-top:.5rem; border-top:1px dashed var(--rule); }
   .detaxis { margin-top:.55rem; font-family:var(--mono); font-size:.7rem; }
@@ -297,28 +331,28 @@
       </div>
 
       <div class="detwrap">
-        <p class="panelcap" style="max-width:78ch;margin-bottom:.7rem">
+        <p class="panelcap" style="max-width:78ch;margin-bottom:.2rem">
           Each detector on its own, from TTE. GBM has no optics &mdash; it
           works out where a burst was purely by comparing how much each
-          detector saw, so this is the fit's actual input. All twelve NaI
-          panels share one vertical scale, printed at the lower right of each,
-          because the comparison <em>between</em> them is the whole signal;
-          scaling each to its own peak would make every detector look alike.
-          The two BGOs are scaled separately, since their band is far wider
-          and their background correspondingly higher. Detectors that
-          triggered are marked <span style="color:var(--peak)">&#9733;</span>,
-          and the figure at the top right is net counts in the T90 window.
-          Each panel's footer gives how far that detector was pointing from
-          the burst, and what it was facing &mdash; open sky, the Earth's
-          limb, or <span style="color:var(--ext);font-weight:650">the Earth
-          itself</span>. That is measured geometry from the spacecraft
-          attitude, not an inference from the counts, and it is what the
-          localization is really reading: across 250 bursts the angle to the
-          burst predicts a detector's net counts with a rank correlation of
-          &minus;0.68, the right sign in 98% of them. Earth-facing detectors
-          also run about 29% <em>quieter</em>, because the planet blocks the
-          cosmic diffuse background over the third of the sky it covers.
+          detector saw, so these fourteen panels are the fit's actual input.
         </p>
+        <details class="keybox" open>
+          <summary>How to read one of these panels</summary>
+          <div class="keybody">
+          <svg class="dgm" viewBox="0 0 840 368" role="img" aria-label="Annotated guide to one detector panel"><rect class="dgm-band t90" x="383.6" y="96" width="114.39999999999998" height="136" /><rect class="dgm-band sn" x="404.4" y="96" width="57.200000000000045" height="136" /><line class="dgm-trig" x1="368.0" y1="96" x2="368.0" y2="232" /><path class="dgm-curve" d="M290.0,202.3L294.1,202.3L294.1,197.3L298.1,197.3L298.1,205.7L302.2,205.7L302.2,207.3L306.2,207.3L306.2,202.0L310.3,202.0L310.3,208.1L314.4,208.1L314.4,211.8L318.4,211.8L318.4,202.7L322.5,202.7L322.5,201.6L326.6,201.6L326.6,206.9L330.6,206.9L330.6,201.1L334.7,201.1L334.7,198.6L338.8,198.6L338.8,208.2L342.8,208.2L342.8,208.7L346.9,208.7L346.9,203.0L350.9,203.0L350.9,208.5L355.0,208.5L355.0,209.9L359.1,209.9L359.1,200.1L363.1,200.1L363.1,200.6L367.2,200.6L367.2,206.6L371.2,206.6L371.2,201.4L375.3,201.4L375.3,200.9L379.4,200.9L379.4,210.6L383.4,210.6L383.4,209.0L387.5,209.0L387.5,202.5L391.6,202.5L391.6,206.9L395.6,206.9L395.6,205.2L399.7,205.2L399.7,191.8L403.8,191.8L403.8,185.6L407.8,185.6L407.8,176.6L411.9,176.6L411.9,149.4L415.9,149.4L415.9,125.6L420.0,125.6L420.0,116.1L424.1,116.1L424.1,107.8L428.1,107.8L428.1,112.6L432.2,112.6L432.2,138.3L436.2,138.3L436.2,148.5L440.3,148.5L440.3,149.8L444.4,149.8L444.4,162.7L448.4,162.7L448.4,176.0L452.5,176.0L452.5,176.0L456.6,176.0L456.6,181.4L460.6,181.4L460.6,192.1L464.7,192.1L464.7,189.1L468.8,189.1L468.8,185.3L472.8,185.3L472.8,193.5L476.9,193.5L476.9,194.7L480.9,194.7L480.9,190.2L485.0,190.2L485.0,198.5L489.1,198.5L489.1,205.4L493.1,205.4L493.1,199.7L497.2,199.7L497.2,201.0L501.2,201.0L501.2,207.0L505.3,207.0L505.3,200.0L509.4,200.0L509.4,195.6L513.4,195.6L513.4,203.4L517.5,203.4L517.5,203.3L521.6,203.3L521.6,198.8L525.6,198.8L525.6,206.8L529.7,206.8L529.7,210.8L533.8,210.8L533.8,202.7L537.8,202.7L537.8,203.4L541.9,203.4L541.9,207.8L545.9,207.8L545.9,200.1L550.0,200.1" /><rect class="dgm-frame" x="290" y="96" width="260" height="136" /><text class="dgm-det" x="297" y="113">n7</text><text class="dgm-star" x="317" y="113">&#9733;</text><text class="dgm-net" x="543" y="113" text-anchor="end">+1,033</text><text class="dgm-foot" x="297" y="225">26&#176; to burst</text><text class="dgm-foot" x="543" y="225" text-anchor="end">sky</text><path class="dgm-lead" d="M276,108L312,108" /><circle class="dgm-dot" cx="312" cy="108" r="2.4" /><text class="dgm-lab " x="268" y="104" text-anchor="end">the detector, and a star</text><text class="dgm-lab " x="268" y="119" text-anchor="end">if it was one that triggered</text><path class="dgm-lead" d="M276,180L332,166" /><circle class="dgm-dot" cx="332" cy="166" r="2.4" /><text class="dgm-lab " x="268" y="176" text-anchor="end">shaded: the full T90 span,</text><text class="dgm-lab " x="268" y="191" text-anchor="end">and the brighter best-S/N</text><text class="dgm-lab " x="268" y="206" text-anchor="end">window actually fitted</text><path class="dgm-lead" d="M276,252L320,220" /><circle class="dgm-dot" cx="320" cy="220" r="2.4" /><text class="dgm-lab " x="268" y="248" text-anchor="end">how far this detector was</text><text class="dgm-lab " x="268" y="263" text-anchor="end">from the burst &#8212; smaller</text><text class="dgm-lab " x="268" y="278" text-anchor="end">means it saw more</text><path class="dgm-lead" d="M564,108L520,108" /><circle class="dgm-dot" cx="520" cy="108" r="2.4" /><text class="dgm-lab " x="572" y="104" text-anchor="start">net counts inside T90,</text><text class="dgm-lab " x="572" y="119" text-anchor="start">background subtracted</text><path class="dgm-lead" d="M564,180L536,156" /><circle class="dgm-dot" cx="536" cy="156" r="2.4" /><text class="dgm-lab " x="572" y="176" text-anchor="start">all twelve NaI share one</text><text class="dgm-lab " x="572" y="191" text-anchor="start">vertical scale &#8212; comparing</text><text class="dgm-lab " x="572" y="206" text-anchor="start">them IS the localization</text><path class="dgm-lead" d="M564,252L530,220" /><circle class="dgm-dot" cx="530" cy="220" r="2.4" /><text class="dgm-lab " x="572" y="248" text-anchor="start">what it faced: sky, limb,</text><text class="dgm-lab " x="572" y="263" text-anchor="start">or <tspan class="dgm-earth">Earth</tspan>. A sun sign</text><text class="dgm-lab " x="572" y="278" text-anchor="start">marks the Sun when it is up</text><path class="dgm-lead" d="M368.0,318L368.0,238" /><circle class="dgm-dot" cx="368.0" cy="238" r="2.4" /><text class="dgm-lab " x="368.0" y="336" text-anchor="middle">the dashed line is the trigger instant</text></svg>
+          <p class="panelcap" style="max-width:78ch">
+            The pointing figures are measured geometry from the spacecraft
+            attitude, not inferred from the counts &mdash; and they are what
+            the localization is really reading. Across 250 bursts the angle to
+            the burst predicts a detector's net counts with a rank correlation
+            of &minus;0.68, the right sign in 98% of them. Earth-facing
+            detectors also run about 29% <em>quieter</em>, because the planet
+            blocks the cosmic diffuse background over the third of the sky it
+            covers. The two BGOs are scaled separately from the NaI, their
+            band being far wider and their background correspondingly higher.
+          </p>
+          </div>
+        </details>
         <div id="dets"></div>
       </div>
 
@@ -384,7 +418,7 @@
   </section>
 
   <footer>
-    Built 2026-11-06 from 2049 bursts with an official GBM HEALPix map.
+    Built 2026-11-09 from 2049 bursts with an official GBM HEALPix map.
     Regions are 90% confidence, drawn from contour polygons rather than images
     so every burst is selectable. Localization by <code>legacy_DoL</code> from
     <code>astro-gdt-fermi</code>, 50&ndash;300&thinsp;keV, scattering on.
