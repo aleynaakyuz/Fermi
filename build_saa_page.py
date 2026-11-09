@@ -66,17 +66,40 @@ def place_labels(entries, top, bottom, gap=14.0):
 
 
 def axis_ticks(lo, hi, n=5):
+    """Pick a round step giving close to n intervals.
+
+    The obvious rule -- take the first nice step at or above (hi-lo)/n --
+    overshoots badly. For a span of 96 asking for 3 intervals it rejects 25
+    as too small and jumps to 50, so the panel ends up with two gridlines.
+    Scoring every candidate on how near it lands to the requested count, and
+    breaking ties toward more ticks, keeps the axis readable.
+    """
     import math
-    raw = (hi - lo) / n
-    if raw <= 0:
+    span = hi - lo
+    if span <= 0:
         return [lo]
-    mag = 10 ** math.floor(math.log10(raw))
-    step = next((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw), mag * 10)
-    out, v = [], math.ceil(lo / step) * step
-    while v <= hi + 1e-9:
-        out.append(round(v, 6))
-        v += step
-    return out
+    def ticks_for(step):
+        out, v = [], math.ceil(lo / step) * step
+        while v <= hi + 1e-9:
+            out.append(round(v, 6))
+            v += step
+        return out
+
+    mag = 10 ** math.floor(math.log10(span / max(n, 1)))
+    best, best_score = None, None
+    for mult in (0.5, 1, 2, 2.5, 5, 10, 20):
+        step = mult * mag
+        got = ticks_for(step)
+        # Score the ticks that actually land inside the range, not the
+        # nominal interval count: a step dividing the span 2.6 times can
+        # still place only two labels once it is aligned to round numbers,
+        # which is how b0 ended up with a single gridline.
+        if not (3 <= len(got) <= 9):
+            continue
+        score = (abs(len(got) - (n + 1)), -len(got))
+        if best_score is None or score < best_score:
+            best, best_score = got, score
+    return best if best is not None else ticks_for(span / max(n, 1))
 
 
 def chart_day(day):
@@ -347,14 +370,16 @@ def main():
             return 0.9, 1.1
         return min(vals) - 0.02, max(vals) + 0.02
 
-    nai_lo, nai_hi = span(NAI)
-    bgo_lo, bgo_hi = span(BGO)
-    grid_nai = "".join(grid_panel(d, chan_all[d], data["t"], nai_lo, nai_hi)
-                       for d in NAI if d in chan_all)
-    grid_bgo = "".join(grid_panel(d, chan_all[d], data["t"], bgo_lo, bgo_hi)
-                       for d in BGO if d in chan_all)
-    nai_key = chan_legend(chan_all[NAI[0]]) if NAI[0] in chan_all else ""
-    bgo_key = chan_legend(chan_all[BGO[0]]) if BGO[0] in chan_all else ""
+    # The explorer draws client-side, so it needs the folds rather than
+    # pre-rendered SVG. Only the fields it actually reads are shipped.
+    explore_json = json.dumps({
+        "t": data["t"],
+        "nai": [d for d in NAI if d in chan_all],
+        "bgo": [d for d in BGO if d in chan_all],
+        "chan": {d: [{"lo": r["lo"], "hi": r["hi"], "base": r["base"],
+                      "rel": r["rel"]} for r in rows]
+                 for d, rows in chan_all.items()},
+    }, separators=(",", ":"))
 
     day = data["day"]
     breaks = sum(1 for v in day["r"] if v is None)
@@ -428,6 +453,30 @@ def main():
   svg.mini .minisub {{ font-size:8px; opacity:.8; }}
   svg.key {{ width:100%; height:auto; display:block; margin:0 0 .5rem; }}
   svg.key text {{ font-family:var(--mono); font-size:9px; fill:var(--muted); }}
+
+  /* ------------------------------------------------------- controls */
+  .ctl {{ display:flex; flex-direction:column; gap:.5rem;
+    padding-bottom:.7rem; margin-bottom:.4rem;
+    border-bottom:1px solid var(--rule); }}
+  .ctlrow {{ display:flex; flex-wrap:wrap; align-items:center; gap:.3rem; }}
+  .ctllab {{ font-family:var(--sans); font-size:.72rem; font-weight:650;
+    text-transform:uppercase; letter-spacing:.04em; color:var(--muted);
+    min-width:68px; }}
+  .chips {{ display:flex; flex-wrap:wrap; gap:.25rem; }}
+  .chips button, .quick button {{ font-family:var(--mono); font-size:.76rem;
+    padding:.2rem .5rem; border-radius:6px; cursor:pointer;
+    border:1px solid var(--rule); background:var(--surface-2);
+    color:var(--ink-soft); }}
+  .chips button[aria-pressed="true"] {{ background:var(--accent);
+    border-color:var(--accent); color:#fff; font-weight:650; }}
+  .quick {{ display:flex; gap:.25rem; margin-left:.5rem; }}
+  .quick button {{ font-family:var(--sans); font-size:.72rem;
+    background:transparent; color:var(--muted); }}
+  .quick button:hover, .chips button:hover {{ border-color:var(--accent); }}
+  /* Energy chips carry their channel's own colour when selected. */
+  .chips button.ch[aria-pressed="true"] {{ color:#fff; font-weight:650; }}
+  #explore:empty::after {{ content:"Nothing selected."; color:var(--muted);
+    font-family:var(--sans); font-size:.82rem; }}
   table {{ border-collapse:collapse; font-family:var(--sans);
     font-size:.86rem; width:100%; }}
   th, td {{ padding:.34rem .6rem; border-bottom:1px solid var(--rule);
@@ -538,25 +587,36 @@ def main():
 </div>
 
 <h2>Every detector, every energy range</h2>
-<p>The same fold repeated for all fourteen detectors and all eight CTIME
-  channels. The twelve NaI share one vertical scale so they can be compared
-  directly; the BGOs are on their own, because their excess is roughly twice
-  as large and would flatten everything else. Nothing is drawn for the time
-  Fermi spends inside the SAA: the detectors are off, so there is no
-  measurement to show.</p>
+<p>Pick the detectors and the energy channels. Each detector gets its own
+  panel. Nothing is drawn for the time Fermi spends inside the SAA: the
+  detectors are off, so there is no measurement to show.</p>
+
 <div class="card">
-  {nai_key}
-  <div class="grid">{grid_nai}</div>
-  <p class="cap">Twelve NaI. Each curve is one energy channel divided by its
-    own quiet level, against minutes since the SAA exit. The dashed line is
-    that quiet level. The ordering is consistent everywhere: the hard
-    channels sit above the soft ones throughout the decay.</p>
-</div>
-<div class="card">
-  {bgo_key}
-  <div class="grid">{grid_bgo}</div>
-  <p class="cap">The two BGOs, on their own scale and with their own channel
-    boundaries, which run to 40 MeV rather than 2 MeV.</p>
+  <div class="ctl">
+    <div class="ctlrow">
+      <span class="ctllab">Detectors</span>
+      <span id="detchips" class="chips"></span>
+      <span class="quick"><button data-pick="nai">all NaI</button><button
+        data-pick="bgo">both BGO</button><button data-pick="few">just n0 n6 b0</button><button
+        data-pick="none">clear</button></span>
+    </div>
+    <div class="ctlrow">
+      <span class="ctllab">Energy</span>
+      <span id="chanchips" class="chips"></span>
+      <span class="quick"><button data-ch="all">all</button><button
+        data-ch="hard">hard only</button><button data-ch="soft">soft only</button></span>
+    </div>
+    <div class="ctlrow">
+      <span class="ctllab">Window</span>
+      <span class="chips" id="spanchips"></span>
+      <span class="ctllab" style="margin-left:1.2rem">Vertical</span>
+      <span class="chips" id="modechips"></span>
+      <span class="ctllab" style="margin-left:1.2rem">Scale</span>
+      <span class="chips" id="scalechips"></span>
+    </div>
+  </div>
+  <p id="explorenote" class="cap"></p>
+  <div id="explore" class="grid"></div>
 </div>
 
 <h2>Fitted decay</h2>
@@ -590,6 +650,250 @@ def main():
     <a href="https://arxiv.org/abs/2005.11219">Biltzinger et al. (2020)</a>
     does, and which is the obvious next step.</p>
 </div>
+
+<script>
+(function () {{
+  var D = {explore_json};
+  var NAI = D.nai, BGO = D.bgo, ALL = NAI.concat(BGO);
+  var state = {{
+    dets: ['n0','n3','n6','n9','b0'],
+    chans: [0,1,2,3,4,5,6,7],
+    span: 30, mode: 'pct', scale: 'shared'
+  }};
+
+  function colour(i) {{
+    var f = i / 7;
+    return 'rgb(' + Math.round(47+170*f) + ',' + Math.round(111-28*f) +
+           ',' + Math.round(208-129*f) + ')';
+  }}
+  // Channel edges differ between NaI and BGO, so a chip shows the NaI range
+  // and each panel states its own underneath.
+  function chanLabel(i) {{
+    var r = D.chan['n0'][i];
+    return (r.lo < 1000 ? r.lo.toFixed(0) : (r.lo/1000).toFixed(0) + 'k') + '-' +
+           (r.hi < 1000 ? r.hi.toFixed(0) : (r.hi/1000).toFixed(0) + 'k');
+  }}
+
+  function chip(host, label, pressed, onclick, cls, style) {{
+    var b = document.createElement('button');
+    b.textContent = label;
+    b.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+    if (cls) b.className = cls;
+    if (style) b.setAttribute('style', style);
+    b.addEventListener('click', onclick);
+    host.appendChild(b);
+    return b;
+  }}
+
+  function buildControls() {{
+    var dh = document.getElementById('detchips');
+    dh.innerHTML = '';
+    ALL.forEach(function (d) {{
+      chip(dh, d, state.dets.indexOf(d) >= 0, function () {{
+        var i = state.dets.indexOf(d);
+        if (i >= 0) state.dets.splice(i, 1); else state.dets.push(d);
+        state.dets.sort(function (a, b) {{ return ALL.indexOf(a) - ALL.indexOf(b); }});
+        render();
+      }});
+    }});
+    var ch = document.getElementById('chanchips');
+    ch.innerHTML = '';
+    for (var i = 0; i < 8; i++) {{
+      (function (i) {{
+        var on = state.chans.indexOf(i) >= 0;
+        chip(ch, chanLabel(i), on, function () {{
+          var k = state.chans.indexOf(i);
+          if (k >= 0) state.chans.splice(k, 1); else state.chans.push(i);
+          state.chans.sort(function (a, b) {{ return a - b; }});
+          render();
+        }}, 'ch', on ? 'background:' + colour(i) + ';border-color:' + colour(i) : '');
+      }})(i);
+    }}
+    var sh = document.getElementById('spanchips');
+    sh.innerHTML = '';
+    [10, 30, 90].forEach(function (v) {{
+      chip(sh, v + ' min', state.span === v, function () {{
+        state.span = v; render();
+      }});
+    }});
+    var mh = document.getElementById('modechips');
+    mh.innerHTML = '';
+    [['pct', '% above quiet'], ['abs', 'counts/s']].forEach(function (m) {{
+      chip(mh, m[1], state.mode === m[0], function () {{
+        state.mode = m[0]; render();
+      }});
+    }});
+    var kh = document.getElementById('scalechips');
+    kh.innerHTML = '';
+    [['shared', 'shared'], ['auto', 'per panel']].forEach(function (m) {{
+      chip(kh, m[1], state.scale === m[0], function () {{
+        state.scale = m[0]; render();
+      }});
+    }});
+  }}
+
+  document.querySelectorAll('.quick button[data-pick]').forEach(function (b) {{
+    b.addEventListener('click', function () {{
+      var p = b.getAttribute('data-pick');
+      state.dets = p === 'nai' ? NAI.slice() : p === 'bgo' ? BGO.slice()
+                 : p === 'few' ? ['n0','n6','b0'] : [];
+      render();
+    }});
+  }});
+  document.querySelectorAll('.quick button[data-ch]').forEach(function (b) {{
+    b.addEventListener('click', function () {{
+      var p = b.getAttribute('data-ch');
+      state.chans = p === 'all' ? [0,1,2,3,4,5,6,7]
+                  : p === 'hard' ? [4,5,6,7] : [0,1,2,3];
+      render();
+    }});
+  }});
+
+  function valueAt(det, c, i) {{
+    var row = D.chan[det][c], v = row.rel[i];
+    if (v === null) return null;
+    return state.mode === 'pct' ? (v - 1) * 100 : v * row.base;
+  }}
+
+  function panel(det, y0, y1, w, h) {{
+    var M = {{l: 40, r: 7, t: 17, b: 23}};
+    var iw = w - M.l - M.r, ih = h - M.t - M.b;
+    var t = D.t, span = state.span;
+    var px = function (v) {{ return M.l + iw * v / span; }};
+    var py = function (v) {{ return M.t + ih * (y1 - v) / (y1 - y0 || 1); }};
+    var s = ['<svg class="mini" viewBox="0 0 ' + w + ' ' + h + '" role="img" ' +
+             'aria-label="Detector ' + det + ' after an SAA exit">'];
+    s.push('<rect class="frame" x="' + M.l + '" y="' + M.t + '" width="' + iw +
+           '" height="' + ih + '" />');
+    s.push('<g class="axis">');
+    var step = span <= 10 ? 2 : span <= 30 ? 10 : 30;
+    for (var v = 0; v <= span; v += step) {{
+      s.push('<line x1="' + px(v).toFixed(1) + '" y1="' + M.t + '" x2="' +
+             px(v).toFixed(1) + '" y2="' + (M.t + ih) + '"/>');
+      s.push('<text x="' + px(v).toFixed(1) + '" y="' + (M.t + ih + 12) +
+             '" text-anchor="middle">' + v + '</text>');
+    }}
+    var ticks = niceTicks(y0, y1, 3);
+    ticks.forEach(function (v) {{
+      s.push('<line x1="' + M.l + '" y1="' + py(v).toFixed(1) + '" x2="' +
+             (M.l + iw) + '" y2="' + py(v).toFixed(1) + '"/>');
+      s.push('<text x="' + (M.l - 5) + '" y="' + (py(v) + 3).toFixed(1) +
+             '" text-anchor="end">' + fmt(v) + '</text>');
+    }});
+    s.push('</g>');
+    var zero = state.mode === 'pct' ? 0 : null;
+    if (zero !== null && y0 < zero && zero < y1) {{
+      s.push('<line class="unity" x1="' + M.l + '" y1="' + py(zero).toFixed(1) +
+             '" x2="' + (M.l + iw) + '" y2="' + py(zero).toFixed(1) + '" />');
+    }}
+    state.chans.forEach(function (c) {{
+      var d = '', pen = false;
+      for (var i = 0; i < t.length; i++) {{
+        if (t[i] > span) break;
+        var v = valueAt(det, c, i);
+        if (v === null) {{ pen = false; continue; }}
+        d += (pen ? 'L' : 'M') + px(t[i]).toFixed(1) + ',' + py(v).toFixed(1);
+        pen = true;
+      }}
+      if (d) s.push('<path class="line thin" style="stroke:' + colour(c) +
+                    '" d="' + d + '" />');
+    }});
+    s.push('<text class="minilab" x="' + M.l + '" y="12">' + det + '</text>');
+    var rows = D.chan[det], sel = state.chans;
+    if (sel.length) {{
+      var lo = rows[Math.min.apply(null, sel)].lo;
+      var hi = rows[Math.max.apply(null, sel)].hi;
+      s.push('<text class="minisub" x="' + (w - M.r) + '" y="12" ' +
+             'text-anchor="end">' + fmtkev(lo) + '-' + fmtkev(hi) + ' keV</text>');
+    }}
+    s.push('</svg>');
+    return s.join('');
+  }}
+
+  function fmtkev(v) {{
+    return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : v.toFixed(0);
+  }}
+  function fmt(v) {{
+    var r = Math.round(v * 10) / 10;
+    return Number.isInteger(r) ? String(r) : r.toFixed(1);
+  }}
+  // Same scoring as the Python axis_ticks: taking the first nice step at or
+  // above the raw interval overshoots and leaves two gridlines on a panel.
+  function niceTicks(lo, hi, n) {{
+    var span = hi - lo;
+    if (!(span > 0)) return [lo];
+    function ticksFor(step) {{
+      var out = [], v = Math.ceil(lo / step) * step;
+      for (; v <= hi + 1e-9; v += step) out.push(Math.round(v * 1e6) / 1e6);
+      return out;
+    }}
+    var mag = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10));
+    var best = null, bestScore = null;
+    [0.5, 1, 2, 2.5, 5, 10, 20].forEach(function (m) {{
+      var got = ticksFor(m * mag);
+      if (got.length < 3 || got.length > 9) return;
+      var score = Math.abs(got.length - (n + 1)) - got.length / 1000;
+      if (bestScore === null || score < bestScore) {{ best = got; bestScore = score; }}
+    }});
+    return best === null ? ticksFor(span / n) : best;
+  }}
+
+  function range(dets) {{
+    var lo = Infinity, hi = -Infinity;
+    dets.forEach(function (det) {{
+      state.chans.forEach(function (c) {{
+        for (var i = 0; i < D.t.length; i++) {{
+          if (D.t[i] > state.span) break;
+          var v = valueAt(det, c, i);
+          if (v === null) continue;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }}
+      }});
+    }});
+    if (!isFinite(lo)) return [0, 1];
+    var pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.08 || 1;
+    return [lo - pad, hi + pad];
+  }}
+
+  function render() {{
+    buildControls();
+    var host = document.getElementById('explore');
+    host.innerHTML = '';
+    var note = document.getElementById('explorenote');
+    if (!state.dets.length || !state.chans.length) {{
+      note.textContent = 'Pick at least one detector and one energy channel.';
+      return;
+    }}
+    // Mixing NaI and BGO on one scale is misleading -- their channel edges
+    // and their excess are both quite different -- so a shared scale is
+    // shared within a type, not across.
+    var nai = state.dets.filter(function (d) {{ return NAI.indexOf(d) >= 0; }});
+    var bgo = state.dets.filter(function (d) {{ return BGO.indexOf(d) >= 0; }});
+    var rn = range(nai), rb = range(bgo);
+    var n = state.dets.length;
+    var cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 6 ? 3 : 4;
+    host.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
+    var w = 236, h = cols <= 2 ? 190 : 150;
+    state.dets.forEach(function (det) {{
+      var isB = BGO.indexOf(det) >= 0;
+      var r = state.scale === 'auto' ? range([det]) : (isB ? rb : rn);
+      host.insertAdjacentHTML('beforeend', panel(det, r[0], r[1], w, h));
+    }});
+    var unit = state.mode === 'pct' ? 'per cent above the quiet level'
+                                    : 'counts/s';
+    note.innerHTML = state.dets.length + ' detector' +
+      (state.dets.length > 1 ? 's' : '') + ', ' + state.chans.length +
+      ' channel' + (state.chans.length > 1 ? 's' : '') + ', first ' +
+      state.span + ' minutes after the exit, vertical axis in ' + unit +
+      ', ' + (state.scale === 'auto' ? 'each panel scaled to its own range'
+              : 'one scale shared across panels of the same detector type') +
+      '. Soft channels blue, hard red.';
+  }}
+
+  render();
+}})();
+</script>
 
 <footer>
   Fermi GBM daily CTIME and position history from the
