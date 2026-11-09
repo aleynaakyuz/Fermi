@@ -228,6 +228,91 @@ def example_day(day, det, step=10.0):
     }
 
 
+def interval(day, det, entry, exit_, before=45.0, after=60.0, step=0.5):
+    """One SAA passage end to end: the approach, the block, the recovery.
+
+    The stacked fold shows the average decay but hides the passage itself.
+    This keeps a single crossing intact so the detectors going off, the gap,
+    and the spike on the way back are all visible in sequence.
+
+    Per energy channel as well as the total, each normalised to its own
+    quiet level taken from the 45-75 minute window after the exit.
+    """
+    got = read_ctime(day, det)
+    if got is None:
+        return None
+    mid, counts, expo, edges = got
+    rel = (mid - exit_) / 60.0
+    sel = (rel >= -before) & (rel < after)
+    if sel.sum() < 100:
+        return None
+    rel, counts, expo = rel[sel], counts[sel], expo[sel]
+
+    bins = np.arange(-before, after + 1e-9, step)
+    nb = len(bins) - 1
+    idx = np.clip(((rel + before) / step).astype(int), 0, nb - 1)
+    exp_b = np.bincount(idx, weights=expo, minlength=nb)
+    centres = bins[:-1] + step / 2
+    quiet = (centres >= 45.0) & (centres < 75.0)
+    if not quiet.any():
+        quiet = centres >= centres.max() - 20
+
+    def series(weights):
+        tot = np.bincount(idx, weights=weights, minlength=nb)
+        rate = np.where(exp_b > step * 0.3, tot / np.maximum(exp_b, 1e-9), np.nan)
+        base = np.nanmedian(rate[quiet])
+        return rate, (float(base) if np.isfinite(base) else np.nan)
+
+    total, total_base = series(counts.sum(axis=1))
+    chans = []
+    for c in range(counts.shape[1]):
+        rate, base = series(counts[:, c])
+        chans.append({
+            "lo": round(float(edges[c]), 1), "hi": round(float(edges[c + 1]), 1),
+            "base": round(base, 2) if np.isfinite(base) else None,
+            "rel": [None if not (np.isfinite(v) and np.isfinite(base) and base > 0)
+                    else round(float(v / base), 4) for v in rate],
+        })
+    return {
+        "day": day, "det": det, "step": step,
+        "entry": round(float((entry - exit_) / 60.0), 3), "exit": 0.0,
+        "inside": round(float((exit_ - entry) / 60.0), 1),
+        "t": [round(float(v), 3) for v in centres],
+        "total": [None if not np.isfinite(v) else int(round(float(v)))
+                  for v in total],
+        "total_base": round(total_base, 1) if np.isfinite(total_base) else None,
+        "chan": chans,
+    }
+
+
+def pick_interval(days):
+    """A long, isolated, quiet passage, and a short one for contrast."""
+    out = []
+    for day in days:
+        exits, _ = saa_exits(day)
+        if exits is None:
+            continue
+        from astropy.io import fits
+        paths = glob.glob(os.path.join(DAILY, day, "glg_poshist_all_*.fit"))
+        with fits.open(paths[0]) as handle:
+            data = handle[1].data
+            met = np.asarray(data["SCLK_UTC"], dtype=float)
+            saa = ((np.asarray(data["FLAGS"]).astype(np.uint16) >> 1) & 1)
+        edge = np.diff(saa.astype(np.int8))
+        entries = met[1:][edge == 1]
+        for a in entries:
+            later = exits[exits > a]
+            if not later.size:
+                continue
+            b = later[0]
+            nxt = entries[entries > b]
+            prev = exits[exits < a]
+            iso = (nxt[0] - b) / 60.0 if nxt.size else 1e9
+            pre = (a - prev[-1]) / 60.0 if prev.size else 1e9
+            out.append((day, float(a), float(b), (b - a) / 60.0, iso, pre))
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=7)
@@ -293,6 +378,54 @@ def main():
 
     day = EXAMPLE_DAY if EXAMPLE_DAY in days else days[len(days) // 2]
     out["day"] = example_day(day, CHAN_DET)
+
+    # Two single passages: a long one, where the activation is obvious, and a
+    # short one, where it is absent. Which is not cherry-picking -- the
+    # amplitude genuinely scales with how long Fermi was inside, measured
+    # below -- and showing only the long one would imply every exit looks
+    # like that.
+    cands = pick_interval(days)
+    wide = [c for c in cands if c[4] > 65 and c[5] > 60]
+    longs = sorted([c for c in wide if c[3] >= 25], key=lambda c: -c[3])
+    shorts = sorted([c for c in wide if c[3] <= 12], key=lambda c: c[3])
+    out["intervals"] = {}
+    for tag, pool in (("long", longs), ("short", shorts)):
+        for day_, a, b, dur, iso, pre in pool:
+            got = interval(day_, CHAN_DET, a, b)
+            if got is not None:
+                out["intervals"][tag] = got
+                break
+
+    # How the excess just after an exit depends on time spent inside.
+    pairs = []
+    for day_, a, b, dur, iso, pre in cands:
+        got = read_ctime(day_, CHAN_DET)
+        if got is None:
+            continue
+        mid, counts, expo, _ = got
+        tot = counts.sum(axis=1)
+
+        def rate(lo, hi):
+            m = (mid >= b + lo * 60) & (mid < b + hi * 60)
+            e = expo[m].sum()
+            return tot[m].sum() / e if e > 1 else np.nan
+
+        q, r0 = rate(45, 75), rate(0.5, 2.5)
+        if np.isfinite(q) and np.isfinite(r0) and q > 0:
+            pairs.append((float(dur), float(100 * (r0 / q - 1))))
+    if pairs:
+        arr = np.array(pairs)
+        bands = []
+        for lo, hi in ((0, 10), (10, 18), (18, 24), (24, 40)):
+            m = (arr[:, 0] >= lo) & (arr[:, 0] < hi)
+            if m.sum() >= 3:
+                bands.append({"lo": lo, "hi": hi, "n": int(m.sum()),
+                              "med": round(float(np.median(arr[m, 1])), 1)})
+        from scipy.stats import spearmanr
+        s = spearmanr(arr[:, 0], arr[:, 1])
+        out["duration"] = {"n": len(pairs), "bands": bands,
+                           "rho": round(float(s.statistic), 3),
+                           "p": float(s.pvalue)}
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w") as handle:

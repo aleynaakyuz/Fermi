@@ -258,6 +258,59 @@ def chart_chan(chan, t):
     return "".join(s)
 
 
+def chart_interval(iv, W=478, H=250):
+    """One SAA passage: approach, block, recovery, in absolute counts/s."""
+    M = dict(l=52, r=12, t=28, b=34)
+    iw, ih = W - M["l"] - M["r"], H - M["t"] - M["b"]
+    t, r = iv["t"], iv["total"]
+    x0, x1 = min(t), max(t)
+    finite = [v for v in r if v is not None]
+    lo, hi = min(finite), max(finite)
+    pad = (hi - lo) * 0.10 or 1
+    y0, y1 = max(0, lo - pad), hi + pad
+    px = lambda v: M["l"] + iw * (v - x0) / (x1 - x0 or 1)
+    py = lambda v: M["t"] + ih * (y1 - v) / (y1 - y0 or 1)
+
+    s = [f'<svg class="fig" viewBox="0 0 {W} {H}" role="img" aria-label="'
+         f'One SAA passage: {iv["inside"]:.0f} minutes inside, then recovery">']
+    s.append(f'<rect class="saaband" x="{px(iv["entry"]):.1f}" y="{M["t"]}" '
+             f'width="{max(px(0)-px(iv["entry"]),1):.1f}" height="{ih}" />')
+    s.append(f'<rect class="frame" x="{M["l"]}" y="{M["t"]}" width="{iw}" '
+             f'height="{ih}" />')
+    s.append('<g class="axis">')
+    for v in axis_ticks(x0, x1, 5):
+        if not (x0 <= v <= x1):
+            continue
+        s.append(f'<line x1="{px(v):.1f}" y1="{M["t"]}" x2="{px(v):.1f}" '
+                 f'y2="{M["t"]+ih}"/>')
+        s.append(f'<text x="{px(v):.1f}" y="{M["t"]+ih+13}" '
+                 f'text-anchor="middle">{v:g}</text>')
+    for v in axis_ticks(y0, y1, 4):
+        if not (y0 <= v <= y1):
+            continue
+        s.append(f'<line x1="{M["l"]}" y1="{py(v):.1f}" x2="{M["l"]+iw}" '
+                 f'y2="{py(v):.1f}"/>')
+        s.append(f'<text x="{M["l"]-6}" y="{py(v)+3:.1f}" text-anchor="end">'
+                 f'{v:g}</text>')
+    s.append(f'<text x="{M["l"]+iw/2}" y="{H-4}" text-anchor="middle">'
+             f'minutes from the SAA exit</text>')
+    s.append(f'<text x="12" y="{M["t"]+ih/2}" text-anchor="middle" '
+             f'transform="rotate(-90 12 {M["t"]+ih/2})">counts/s</text>')
+    s.append('</g>')
+    # The quiet level the excess is measured against.
+    if iv.get("total_base") and y0 < iv["total_base"] < y1:
+        s.append(f'<line class="unity" x1="{M["l"]}" y1="{py(iv["total_base"]):.1f}" '
+                 f'x2="{M["l"]+iw}" y2="{py(iv["total_base"]):.1f}" />')
+    s.append(f'<path class="line" d="{path_from(t, r, px, py)}" />')
+    mid_band = (px(iv["entry"]) + px(0)) / 2
+    s.append(f'<text class="bandlab" x="{mid_band:.1f}" y="{M["t"]-16}" '
+             f'text-anchor="middle">detectors off</text>')
+    s.append(f'<text class="bandlab" x="{mid_band:.1f}" y="{M["t"]-6}" '
+             f'text-anchor="middle">{iv["inside"]:.0f} min inside the SAA</text>')
+    s.append('</svg>')
+    return "".join(s)
+
+
 def chan_colour(frac):
     """Soft blue to hard red, matching the viewer's band colours."""
     return f"rgb({int(47+170*frac)},{int(111-28*frac)},{int(208-129*frac)})"
@@ -381,6 +434,32 @@ def main():
                  for d, rows in chan_all.items()},
     }, separators=(",", ":"))
 
+    import numpy as np
+    ivs = data.get("intervals") or {}
+
+    def iv_excess(iv):
+        t = np.asarray(iv["t"], dtype=float)
+        r = np.array([np.nan if v is None else v for v in iv["total"]], dtype=float)
+        m = (t >= 0.5) & (t < 2.5)
+        v = np.nanmedian(r[m]) if m.any() else np.nan
+        b = iv.get("total_base")
+        return 100 * (v / b - 1) if (b and np.isfinite(v)) else float("nan")
+
+    interval_long = chart_interval(ivs["long"]) if "long" in ivs else ""
+    interval_short = chart_interval(ivs["short"]) if "short" in ivs else ""
+    long_inside = ivs.get("long", {}).get("inside", 0)
+    short_inside = ivs.get("short", {}).get("inside", 0)
+    long_excess = iv_excess(ivs["long"]) if "long" in ivs else 0
+    short_excess = iv_excess(ivs["short"]) if "short" in ivs else 0
+
+    dur = data.get("duration") or {"n": 0, "bands": [], "rho": 0, "p": 1}
+    dur_n, dur_rho = dur["n"], dur["rho"]
+    dur_p = f"{dur['p']:.0e}".replace("e-", "e&minus;")
+    dur_rows = "".join(
+        f'<tr><td>{b["lo"]}&ndash;{b["hi"]} min</td>'
+        f'<td class="n">{b["n"]}</td><td class="n">{b["med"]:+.1f}%</td></tr>'
+        for b in dur["bands"])
+
     day = data["day"]
     breaks = sum(1 for v in day["r"] if v is None)
     n_saa = len(day["saa"])
@@ -435,6 +514,10 @@ def main():
   svg.fig .unity {{ stroke:var(--muted); stroke-width:1;
     stroke-dasharray:4,3; opacity:.7; }}
   svg.fig .serieslab {{ font-family:var(--mono); font-size:9.5px; }}
+  svg.fig .bandlab {{ font-family:var(--sans); font-size:9px;
+    fill:var(--hot); }}
+  .pair {{ display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }}
+  @media (max-width:760px) {{ .pair {{ grid-template-columns:1fr; }} }}
   .cap {{ font-size:.78rem; color:var(--muted); font-family:var(--sans);
     margin:.5rem 0 0; max-width:86ch; }}
   .grid {{ display:grid; gap:.4rem;
@@ -541,6 +624,34 @@ def main():
     {covered:.1f} of the 24 hours with data. Each restart is followed by a
     spike that decays within minutes. The slower rise and fall underneath is
     orbital.</p>
+</div>
+
+<h2>One passage, end to end</h2>
+<p>A single crossing rather than the average: the approach, the gap while the
+  detectors are off, and the recovery. Two of them, because the size of the
+  spike is not the same every time &mdash; it depends on how long Fermi spent
+  inside.</p>
+<div class="card">
+  <div class="pair">{interval_long}{interval_short}</div>
+  <p class="cap">Detector n0. Shaded is the SAA passage itself, with no trace
+    because the detectors are switched off; the dashed line is the quiet
+    level taken 45&ndash;75 minutes after the exit. Left: a
+    {long_inside:.0f}-minute crossing, back at {long_excess:+.0f}% above
+    quiet. Right: a {short_inside:.0f}-minute one, back at
+    {short_excess:+.0f}%.</p>
+</div>
+<div class="card">
+  <p>That is not a quirk of two examples. Across {dur_n} passages the excess
+    in the first couple of minutes after an exit rises steadily with time
+    spent inside, at Spearman {dur_rho:+.2f} (p = {dur_p}):</p>
+  <table>
+    <tr><th>Time inside the SAA</th><th style="text-align:right">Passages</th>
+        <th style="text-align:right">Median excess just after exit</th></tr>
+    {dur_rows}
+  </table>
+  <p class="cap">A short dip into the edge of the anomaly leaves essentially
+    nothing behind. This is one reason a model cannot treat every exit alike,
+    and it is the obvious next parameter after the decay constant.</p>
 </div>
 
 <h2>Stacked on the moment of exit</h2>
