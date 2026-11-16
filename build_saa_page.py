@@ -203,18 +203,47 @@ def chart_fold(data, dets, title_colour):
     return "".join(s)
 
 
+def log_ticks(lo, hi):
+    """Decade and 1-2-5 ticks spanning a log axis."""
+    import math
+    out = []
+    dec = math.floor(math.log10(lo))
+    while 10 ** dec <= hi * 10:
+        for m in (1, 2, 5):
+            v = m * 10 ** dec
+            if lo <= v <= hi:
+                out.append(v)
+        dec += 1
+    return out
+
+
 def chart_chan(chan, t):
-    """Energy dependence: each channel relative to its own quiet level."""
+    """Energy dependence, in real counts/s on a logarithmic axis.
+
+    Absolute rates rather than each channel divided by its own quiet level.
+    That normalisation made the curves directly comparable but hid what the
+    numbers actually were, and it put a reference line on the plot that is
+    not physically a floor -- the baseline itself wanders a few per cent on
+    the orbital period. The log axis does the comparing job instead: the
+    channels span 31 to 333 counts/s, an order of magnitude, and on a linear
+    axis the soft ones would flatten the hard ones, which is exactly where
+    the activation is.
+    """
     W, H, M = 980, 320, dict(l=62, r=150, t=14, b=38)
     iw, ih = W - M["l"] - M["r"], H - M["t"] - M["b"]
     rows = chan["rows"]
-    vals = [v for r in rows for v in r["rel"] if v is not None]
-    y0, y1 = min(vals) - 0.03, max(vals) + 0.03
+    import math
+    for r in rows:
+        r["abs"] = [None if v is None or not r["base"] else round(v * r["base"], 2)
+                    for v in r["rel"]]
+    vals = [v for r in rows for v in r["abs"] if v]
+    y0, y1 = min(vals) * 0.85, max(vals) * 1.18
     px = lambda v: M["l"] + iw * v / (max(t) or 1)
-    py = lambda v: M["t"] + ih * (y1 - v) / (y1 - y0 or 1)
+    lg0, lg1 = math.log10(y0), math.log10(y1)
+    py = lambda v: M["t"] + ih * (lg1 - math.log10(max(v, 1e-9))) / (lg1 - lg0 or 1)
 
     s = [f'<svg class="fig" viewBox="0 0 {W} {H}" role="img" aria-label="'
-         f'Relative excess after an SAA exit, by energy channel">']
+         f'Count rate after an SAA exit, by energy channel">']
     s.append(f'<rect class="frame" x="{M["l"]}" y="{M["t"]}" width="{iw}" '
              f'height="{ih}" />')
     s.append('<g class="axis">')
@@ -225,9 +254,7 @@ def chart_chan(chan, t):
                  f'y2="{M["t"]+ih}"/>')
         s.append(f'<text x="{px(v):.1f}" y="{M["t"]+ih+14}" text-anchor="middle">'
                  f'{v:g}</text>')
-    for v in axis_ticks(y0, y1, 4):
-        if not (y0 <= v <= y1):
-            continue
+    for v in log_ticks(y0, y1):
         s.append(f'<line x1="{M["l"]}" y1="{py(v):.1f}" x2="{M["l"]+iw}" '
                  f'y2="{py(v):.1f}"/>')
         s.append(f'<text x="{M["l"]-7}" y="{py(v)+3:.1f}" text-anchor="end">'
@@ -235,19 +262,16 @@ def chart_chan(chan, t):
     s.append(f'<text x="{M["l"]+iw/2}" y="{H-4}" text-anchor="middle">'
              f'minutes since leaving the SAA</text>')
     s.append(f'<text x="13" y="{M["t"]+ih/2}" text-anchor="middle" '
-             f'transform="rotate(-90 13 {M["t"]+ih/2})">rate / quiet rate</text>')
+             f'transform="rotate(-90 13 {M["t"]+ih/2})">counts/s</text>')
     s.append('</g>')
-    if y0 < 1.0 < y1:
-        s.append(f'<line class="unity" x1="{M["l"]}" y1="{py(1.0):.1f}" '
-                 f'x2="{M["l"]+iw}" y2="{py(1.0):.1f}" />')
     wanted = []
     for i, row in enumerate(rows):
         frac = i / max(len(rows) - 1, 1)
         # Soft channels blue, hard channels red, matching the viewer.
         col = (f"rgb({int(47+170*frac)},{int(111-28*frac)},{int(208-129*frac)})")
         s.append(f'<path class="line" style="stroke:{col}" '
-                 f'd="{path_from(t, row["rel"], px, py)}" />')
-        last = next((v for v in reversed(row["rel"]) if v is not None), None)
+                 f'd="{path_from(t, row["abs"], px, py)}" />')
+        last = next((v for v in reversed(row["abs"]) if v is not None), None)
         if last is not None:
             wanted.append((py(last),
                            (f'{row["lo"]:g}-{row["hi"]:g} keV', col)))
@@ -297,10 +321,6 @@ def chart_interval(iv, W=478, H=250):
     s.append(f'<text x="12" y="{M["t"]+ih/2}" text-anchor="middle" '
              f'transform="rotate(-90 12 {M["t"]+ih/2})">counts/s</text>')
     s.append('</g>')
-    # The quiet level the excess is measured against.
-    if iv.get("total_base") and y0 < iv["total_base"] < y1:
-        s.append(f'<line class="unity" x1="{M["l"]}" y1="{py(iv["total_base"]):.1f}" '
-                 f'x2="{M["l"]+iw}" y2="{py(iv["total_base"]):.1f}" />')
     s.append(f'<path class="line" d="{path_from(t, r, px, py)}" />')
     mid_band = (px(iv["entry"]) + px(0)) / 2
     s.append(f'<text class="bandlab" x="{mid_band:.1f}" y="{M["t"]-16}" '
@@ -314,63 +334,6 @@ def chart_interval(iv, W=478, H=250):
 def chan_colour(frac):
     """Soft blue to hard red, matching the viewer's band colours."""
     return f"rgb({int(47+170*frac)},{int(111-28*frac)},{int(208-129*frac)})"
-
-
-def grid_panel(det, rows, t, y0, y1, W=236, H=150):
-    """One small multiple: every energy channel of one detector."""
-    M = dict(l=34, r=6, t=16, b=22)
-    iw, ih = W - M["l"] - M["r"], H - M["t"] - M["b"]
-    px = lambda v: M["l"] + iw * v / (max(t) or 1)
-    py = lambda v: M["t"] + ih * (y1 - v) / (y1 - y0 or 1)
-    s = [f'<svg class="mini" viewBox="0 0 {W} {H}" role="img" '
-         f'aria-label="Detector {det}, excess after an SAA exit by energy">']
-    s.append(f'<rect class="frame" x="{M["l"]}" y="{M["t"]}" width="{iw}" '
-             f'height="{ih}" />')
-    s.append('<g class="axis">')
-    for v in (0, 30, 60, 90):
-        if v > max(t):
-            continue
-        s.append(f'<line x1="{px(v):.1f}" y1="{M["t"]}" x2="{px(v):.1f}" '
-                 f'y2="{M["t"]+ih}"/>')
-        s.append(f'<text x="{px(v):.1f}" y="{M["t"]+ih+12}" '
-                 f'text-anchor="middle">{v}</text>')
-    for v in axis_ticks(y0, y1, 3):
-        if not (y0 <= v <= y1):
-            continue
-        s.append(f'<line x1="{M["l"]}" y1="{py(v):.1f}" x2="{M["l"]+iw}" '
-                 f'y2="{py(v):.1f}"/>')
-        s.append(f'<text x="{M["l"]-5}" y="{py(v)+3:.1f}" text-anchor="end">'
-                 f'{v:g}</text>')
-    s.append('</g>')
-    if y0 < 1.0 < y1:
-        s.append(f'<line class="unity" x1="{M["l"]}" y1="{py(1.0):.1f}" '
-                 f'x2="{M["l"]+iw}" y2="{py(1.0):.1f}" />')
-    for i, row in enumerate(rows):
-        frac = i / max(len(rows) - 1, 1)
-        s.append(f'<path class="line thin" style="stroke:{chan_colour(frac)}" '
-                 f'd="{path_from(t, row["rel"], px, py)}" />')
-    s.append(f'<text class="minilab" x="{M["l"]}" y="11">{det}</text>')
-    s.append(f'<text class="minisub" x="{W-M["r"]}" y="11" text-anchor="end">'
-             f'{rows[0]["lo"]:g}&#8211;{rows[-1]["hi"]:g} keV</text>')
-    s.append('</svg>')
-    return "".join(s)
-
-
-def chan_legend(rows, width=980):
-    """Shared key for the grid: which colour is which energy."""
-    s = [f'<svg class="key" viewBox="0 0 {width} 26" role="img" '
-         f'aria-label="Energy channel colour key">']
-    x = 4
-    for i, row in enumerate(rows):
-        frac = i / max(len(rows) - 1, 1)
-        s.append(f'<line x1="{x}" y1="13" x2="{x+20}" y2="13" '
-                 f'style="stroke:{chan_colour(frac)};stroke-width:2.4" />')
-        label = f'{row["lo"]:g}-{row["hi"]:g}'
-        s.append(f'<text x="{x+25}" y="16">{label}</text>')
-        x += 32 + 6.1 * len(label)
-    s.append(f'<text x="{min(x+6, width-4)}" y="16">keV</text>')
-    s.append('</svg>')
-    return "".join(s)
 
 
 def main():
@@ -398,17 +361,18 @@ def main():
     for row in data["chan"]["rows"]:
         rel = np.array([np.nan if v is None else v for v in row["rel"]])
 
-        def excess(lo, hi):
+        # Real counts/s at each delay, not an excess over a reference.
+        def rate(lo, hi):
             m = (t_arr >= lo) & (t_arr < hi)
-            v = np.nanmedian(rel[m]) if m.any() else np.nan
-            return "&mdash;" if not np.isfinite(v) else f"{100*(v-1):+.1f}%"
+            v = np.nanmedian(rel[m]) * (row["base"] or 0) if m.any() else np.nan
+            return "&mdash;" if not np.isfinite(v) else f"{v:,.0f}"
 
         chan_rows.append(
             f'<tr><td class="m">{row["lo"]:g}&ndash;{row["hi"]:g} keV</td>'
-            f'<td class="n">{row["base"]:,.0f}</td>'
-            f'<td class="n">{excess(0,1)}</td>'
-            f'<td class="n">{excess(2,5)}</td>'
-            f'<td class="n">{excess(10,20)}</td></tr>')
+            f'<td class="n">{rate(0,1)}</td>'
+            f'<td class="n">{rate(2,5)}</td>'
+            f'<td class="n">{rate(10,20)}</td>'
+            f'<td class="n">{rate(60,90)}</td></tr>')
     chan_rows = "".join(chan_rows)
 
     # The all-detector grid. One shared vertical scale across the twelve NaI
@@ -429,8 +393,13 @@ def main():
         "t": data["t"],
         "nai": [d for d in NAI if d in chan_all],
         "bgo": [d for d in BGO if d in chan_all],
-        "chan": {d: [{"lo": r["lo"], "hi": r["hi"], "base": r["base"],
-                      "rel": r["rel"]} for r in rows]
+        # Real counts/s, not the ratio to a quiet level. rel was stored
+        # normalised, so it is multiplied back out here rather than
+        # re-running the extraction.
+        "chan": {d: [{"lo": r["lo"], "hi": r["hi"],
+                      "rate": [None if v is None or not r["base"]
+                               else round(v * r["base"], 2) for v in r["rel"]]}
+                     for r in rows]
                  for d, rows in chan_all.items()},
     }, separators=(",", ":"))
 
@@ -451,6 +420,17 @@ def main():
     short_inside = ivs.get("short", {}).get("inside", 0)
     long_excess = iv_excess(ivs["long"]) if "long" in ivs else 0
     short_excess = iv_excess(ivs["short"]) if "short" in ivs else 0
+
+    def iv_rate(iv):
+        t = np.asarray(iv["t"], dtype=float)
+        r = np.array([np.nan if v is None else v for v in iv["total"]], dtype=float)
+        m = (t >= 0.5) & (t < 2.5)
+        return float(np.nanmedian(r[m])) if m.any() else float("nan")
+
+    long_rate = iv_rate(ivs["long"]) if "long" in ivs else 0
+    short_rate = iv_rate(ivs["short"]) if "short" in ivs else 0
+    long_base = (ivs.get("long") or {}).get("total_base") or 0
+    short_base = (ivs.get("short") or {}).get("total_base") or 0
 
     dur = data.get("duration") or {"n": 0, "bands": [], "rho": 0, "p": 1}
     dur_n, dur_rho = dur["n"], dur["rho"]
@@ -633,12 +613,12 @@ def main():
   inside.</p>
 <div class="card">
   <div class="pair">{interval_long}{interval_short}</div>
-  <p class="cap">Detector n0. Shaded is the SAA passage itself, with no trace
-    because the detectors are switched off; the dashed line is the quiet
-    level taken 45&ndash;75 minutes after the exit. Left: a
-    {long_inside:.0f}-minute crossing, back at {long_excess:+.0f}% above
-    quiet. Right: a {short_inside:.0f}-minute one, back at
-    {short_excess:+.0f}%.</p>
+  <p class="cap">Detector n0, total counts/s. Shaded is the SAA passage
+    itself, with no trace because the detectors are switched off. Left: a
+    {long_inside:.0f}-minute crossing, back at {long_rate:,.0f} counts/s
+    against {long_base:,.0f} an hour later. Right: a
+    {short_inside:.0f}-minute one, back at {short_rate:,.0f} against
+    {short_base:,.0f}.</p>
 </div>
 <div class="card">
   <p>That is not a quirk of two examples. Across {dur_n} passages the excess
@@ -676,25 +656,27 @@ def main():
   excess in the first minute climbs from about a tenth in the softest channel
   to roughly three quarters around half an MeV &mdash; where the de-excitation
   lines of activated material sit. The two softest channels go <em>below</em>
-  their quiet level after a few minutes, which is orbital rather than
+  their pre-passage level after a few minutes, which is orbital rather than
   activation: an SAA exit happens at a particular point in the orbit, and the
   soft background tracks orbital position.</p>
 <div class="card">
   {chart_chan(data['chan'], data['t'])}
-  <p class="cap">Detector {data['chan']['det']}, each channel divided by its
-    own quiet level so channels differing by orders of magnitude in absolute
-    rate can be compared. Dashed line is the quiet level. Soft channels blue,
-    hard channels red.</p>
+  <p class="cap">Detector {data['chan']['det']}, real counts/s per channel on
+    a logarithmic axis. Log rather than linear because the channels span 31 to
+    333 counts/s: on a linear axis the soft ones flatten the hard ones, which
+    is where the activation is. Soft channels blue, hard red.</p>
 </div>
 <div class="card">
 <table>
-  <tr><th>Channel</th><th style="text-align:right">Quiet rate</th>
+  <tr><th>Channel</th>
       <th style="text-align:right">0&ndash;1 min</th>
       <th style="text-align:right">2&ndash;5 min</th>
-      <th style="text-align:right">10&ndash;20 min</th></tr>
+      <th style="text-align:right">10&ndash;20 min</th>
+      <th style="text-align:right">60&ndash;90 min</th></tr>
   {chan_rows}
 </table>
-  <p class="cap">Excess over each channel's own quiet level.</p>
+  <p class="cap">Counts/s at each delay after the exit. The last column is
+    the settled level an hour or more later, for comparison.</p>
 </div>
 
 <h2>Every detector, every energy range</h2>
@@ -720,7 +702,7 @@ def main():
     <div class="ctlrow">
       <span class="ctllab">Window</span>
       <span class="chips" id="spanchips"></span>
-      <span class="ctllab" style="margin-left:1.2rem">Vertical</span>
+      <span class="ctllab" style="margin-left:1.2rem">Axis</span>
       <span class="chips" id="modechips"></span>
       <span class="ctllab" style="margin-left:1.2rem">Scale</span>
       <span class="chips" id="scalechips"></span>
@@ -769,7 +751,7 @@ def main():
   var state = {{
     dets: ['n0','n3','n6','n9','b0'],
     chans: [0,1,2,3,4,5,6,7],
-    span: 30, mode: 'pct', scale: 'shared'
+    span: 30, axis: 'log', scale: 'shared'
   }};
 
   function colour(i) {{
@@ -829,9 +811,9 @@ def main():
     }});
     var mh = document.getElementById('modechips');
     mh.innerHTML = '';
-    [['pct', '% above quiet'], ['abs', 'counts/s']].forEach(function (m) {{
-      chip(mh, m[1], state.mode === m[0], function () {{
-        state.mode = m[0]; render();
+    [['log', 'log'], ['lin', 'linear']].forEach(function (m) {{
+      chip(mh, m[1], state.axis === m[0], function () {{
+        state.axis = m[0]; render();
       }});
     }});
     var kh = document.getElementById('scalechips');
@@ -860,10 +842,12 @@ def main():
     }});
   }});
 
+  // Real counts/s. The earlier version could divide each channel by its own
+  // quiet level, which made the curves comparable but hid what the numbers
+  // were and drew a reference line that is not physically a floor.
   function valueAt(det, c, i) {{
-    var row = D.chan[det][c], v = row.rel[i];
-    if (v === null) return null;
-    return state.mode === 'pct' ? (v - 1) * 100 : v * row.base;
+    var v = D.chan[det][c].rate[i];
+    return v === null ? null : v;
   }}
 
   function panel(det, y0, y1, w, h) {{
@@ -871,7 +855,14 @@ def main():
     var iw = w - M.l - M.r, ih = h - M.t - M.b;
     var t = D.t, span = state.span;
     var px = function (v) {{ return M.l + iw * v / span; }};
-    var py = function (v) {{ return M.t + ih * (y1 - v) / (y1 - y0 || 1); }};
+    var lg = state.axis === 'log';
+    var l0 = lg ? Math.log(Math.max(y0, 1e-6)) : 0;
+    var l1 = lg ? Math.log(Math.max(y1, 1e-6)) : 0;
+    var py = lg
+      ? function (v) {{
+          return M.t + ih * (l1 - Math.log(Math.max(v, 1e-6))) / (l1 - l0 || 1);
+        }}
+      : function (v) {{ return M.t + ih * (y1 - v) / (y1 - y0 || 1); }};
     var s = ['<svg class="mini" viewBox="0 0 ' + w + ' ' + h + '" role="img" ' +
              'aria-label="Detector ' + det + ' after an SAA exit">'];
     s.push('<rect class="frame" x="' + M.l + '" y="' + M.t + '" width="' + iw +
@@ -884,7 +875,7 @@ def main():
       s.push('<text x="' + px(v).toFixed(1) + '" y="' + (M.t + ih + 12) +
              '" text-anchor="middle">' + v + '</text>');
     }}
-    var ticks = niceTicks(y0, y1, 3);
+    var ticks = lg ? logTicks(y0, y1) : niceTicks(y0, y1, 3);
     ticks.forEach(function (v) {{
       s.push('<line x1="' + M.l + '" y1="' + py(v).toFixed(1) + '" x2="' +
              (M.l + iw) + '" y2="' + py(v).toFixed(1) + '"/>');
@@ -892,11 +883,6 @@ def main():
              '" text-anchor="end">' + fmt(v) + '</text>');
     }});
     s.push('</g>');
-    var zero = state.mode === 'pct' ? 0 : null;
-    if (zero !== null && y0 < zero && zero < y1) {{
-      s.push('<line class="unity" x1="' + M.l + '" y1="' + py(zero).toFixed(1) +
-             '" x2="' + (M.l + iw) + '" y2="' + py(zero).toFixed(1) + '" />');
-    }}
     state.chans.forEach(function (c) {{
       var d = '', pen = false;
       for (var i = 0; i < t.length; i++) {{
@@ -930,6 +916,18 @@ def main():
   }}
   // Same scoring as the Python axis_ticks: taking the first nice step at or
   // above the raw interval overshoots and leaves two gridlines on a panel.
+  function logTicks(lo, hi) {{
+    var out = [], dec = Math.floor(Math.log(lo) / Math.LN10);
+    while (Math.pow(10, dec) <= hi * 10) {{
+      [1, 2, 5].forEach(function (m) {{
+        var v = m * Math.pow(10, dec);
+        if (v >= lo && v <= hi) out.push(v);
+      }});
+      dec++;
+    }}
+    return out.length ? out : [lo, hi];
+  }}
+
   function niceTicks(lo, hi, n) {{
     var span = hi - lo;
     if (!(span > 0)) return [lo];
@@ -962,7 +960,12 @@ def main():
         }}
       }});
     }});
-    if (!isFinite(lo)) return [0, 1];
+    if (!isFinite(lo)) return [1, 10];
+    if (state.axis === 'log') {{
+      // Multiplicative padding: a log axis cannot show zero, and a subtracted
+      // pad would drive a small rate negative.
+      return [Math.max(lo * 0.85, 1e-3), hi * 1.18];
+    }}
     var pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.08 || 1;
     return [lo - pad, hi + pad];
   }}
@@ -991,8 +994,8 @@ def main():
       var r = state.scale === 'auto' ? range([det]) : (isB ? rb : rn);
       host.insertAdjacentHTML('beforeend', panel(det, r[0], r[1], w, h));
     }});
-    var unit = state.mode === 'pct' ? 'per cent above the quiet level'
-                                    : 'counts/s';
+    var unit = 'counts/s on a ' + (state.axis === 'log' ? 'logarithmic'
+                                                          : 'linear') + ' axis';
     note.innerHTML = state.dets.length + ' detector' +
       (state.dets.length > 1 ? 's' : '') + ', ' + state.chans.length +
       ' channel' + (state.chans.length > 1 ? 's' : '') + ', first ' +
