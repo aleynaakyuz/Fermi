@@ -20,6 +20,8 @@ HOT = "#d9534f"
 WARM = "#b8690a"
 COOL = "#1f9e6e"
 
+CLEAN_MAX = 70.0        # must match extract_saa.py
+
 NAI = [f"n{d}" for d in "0123456789ab"]
 BGO = ["b0", "b1"]
 
@@ -164,6 +166,13 @@ def chart_fold(data, dets, title_colour):
 
     s = [f'<svg class="fig" viewBox="0 0 {W} {H}" role="img" aria-label="'
          f'Count rate against time since leaving the SAA">']
+    # Past about 70 minutes the spacecraft is approaching the next anomaly and
+    # passages start dropping out of the average, so that stretch is marked.
+    if max(t) > CLEAN_MAX:
+        s.append(f'<rect class="stale" x="{px(CLEAN_MAX):.1f}" y="{M["t"]}" '
+                 f'width="{px(max(t))-px(CLEAN_MAX):.1f}" height="{ih}" />')
+        s.append(f'<text class="bandlab" x="{(px(CLEAN_MAX)+px(max(t)))/2:.1f}" '
+                 f'y="{M["t"]+12}" text-anchor="middle">nearing the next SAA</text>')
     s.append(f'<rect class="frame" x="{M["l"]}" y="{M["t"]}" width="{iw}" '
              f'height="{ih}" />')
     s.append('<g class="axis">')
@@ -445,6 +454,13 @@ def main():
     n_saa = len(day["saa"])
     covered = sum(1 for v in day["r"] if v is not None) * day["step"] / 3600.0
 
+    clean_max = CLEAN_MAX
+    rec = data.get('recur') or {}
+    recur_n = rec.get('n', 0)
+    recur_med = rec.get('median', 0)
+    recur_min = rec.get('min', 0)
+    surv = dict(rec.get('survive') or [])
+    surv80, surv90 = surv.get(80, 0), surv.get(90, 0)
     built = datetime.date.today().isoformat()
     html = f"""<title>SAA Background in Fermi GBM</title>
 <style>
@@ -491,6 +507,7 @@ def main():
   svg.fig .line {{ fill:none; stroke:var(--accent); stroke-width:1.4;
     stroke-linejoin:round; }}
   svg.fig .saaband {{ fill:var(--hot); fill-opacity:.17; }}
+  svg.fig .stale, svg.mini .stale {{ fill:var(--muted); fill-opacity:.12; }}
   svg.fig .unity {{ stroke:var(--muted); stroke-width:1;
     stroke-dasharray:4,3; opacity:.7; }}
   svg.fig .serieslab {{ font-family:var(--mono); font-size:9.5px; }}
@@ -651,6 +668,24 @@ def main():
     would be wrong.</p>
 </div>
 
+<div class="card warn">
+  <p><strong>Why the curves turn up again near the right-hand edge.</strong>
+    Fermi's orbit is about 96 minutes and SAA crossings recur every
+    {recur_min:.0f} to 90 minutes, median {recur_med:.0f}, so by roughly
+    {clean_max:.0f} minutes after one exit the spacecraft is already
+    approaching the next anomaly and the particle rate is climbing. That part
+    is real.</p>
+  <p>What follows it is not. Passages leave the average as they re-enter the
+    SAA: all {recur_n} contribute at 70 minutes, {surv80} at 80 and
+    {surv90} at 90 &mdash; and the ones that survive are the atypical orbits
+    that skip the anomaly altogether. The shaded stretch is therefore a
+    shrinking, self-selected sample and should not be read as a measurement.
+    The quiet level these rates are compared against is taken from
+    25&ndash;70 minutes for the same reason; an earlier version used
+    60&ndash;90, which sat inside the contaminated region and put the
+    reference up to 14% too high on nb.</p>
+</div>
+
 <h2>Is the activation harder than the background?</h2>
 <p>Markedly so. Splitting the same fold by CTIME's eight energy channels, the
   excess in the first minute climbs from about a tenth in the softest channel
@@ -748,6 +783,7 @@ def main():
 (function () {{
   var D = {explore_json};
   var NAI = D.nai, BGO = D.bgo, ALL = NAI.concat(BGO);
+  var CLEAN_MAX = {clean_max};
   var state = {{
     dets: ['n0','n3','n6','n9','b0'],
     chans: [0,1,2,3,4,5,6,7],
@@ -865,6 +901,11 @@ def main():
       : function (v) {{ return M.t + ih * (y1 - v) / (y1 - y0 || 1); }};
     var s = ['<svg class="mini" viewBox="0 0 ' + w + ' ' + h + '" role="img" ' +
              'aria-label="Detector ' + det + ' after an SAA exit">'];
+    if (span > CLEAN_MAX) {{
+      s.push('<rect class="stale" x="' + px(CLEAN_MAX).toFixed(1) + '" y="' + M.t +
+             '" width="' + (px(span) - px(CLEAN_MAX)).toFixed(1) +
+             '" height="' + ih + '" />');
+    }}
     s.push('<rect class="frame" x="' + M.l + '" y="' + M.t + '" width="' + iw +
            '" height="' + ih + '" />');
     s.push('<g class="axis">');
@@ -1002,7 +1043,10 @@ def main():
       state.span + ' minutes after the exit, vertical axis in ' + unit +
       ', ' + (state.scale === 'auto' ? 'each panel scaled to its own range'
               : 'one scale shared across panels of the same detector type') +
-      '. Soft channels blue, hard red.';
+      '. Soft channels blue, hard red.' + (state.span > CLEAN_MAX
+        ? ' The shaded stretch past ' + CLEAN_MAX + ' min is the approach to '
+          + 'the NEXT anomaly, where passages also start dropping out of the '
+          + 'average as they re-enter -- read it with care.' : '');
   }}
 
   render();

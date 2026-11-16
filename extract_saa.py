@@ -39,7 +39,18 @@ EXAMPLE_DAY = "220827"
 
 FOLD_MAX = 90.0          # minutes after an exit
 FOLD_STEP = 0.5
-BASE_LO, BASE_HI = 60.0, 90.0     # quiet reference window
+# Quiet reference window. NOT 60-90 minutes, which is where it started and
+# which is contaminated at both ends. Fermi's orbit is about 96 minutes and
+# SAA crossings recur every 72-90 (median 79), so by 70 minutes after an exit
+# the spacecraft is already approaching the next anomaly and the rate is
+# climbing again. Worse, passages drop out of the fold as they re-enter: all
+# 189 contribute at 70 minutes, 46% at 80, 20% at 90 -- and the survivors are
+# the atypical orbits that skip the SAA altogether. 25-70 minutes is after
+# the activation has decayed and before any of that begins.
+BASE_LO, BASE_HI = 25.0, 70.0
+
+# Beyond this the fold is a shrinking, self-selected sample; the page says so.
+CLEAN_MAX = 70.0
 
 
 def saa_exits(day):
@@ -395,6 +406,32 @@ def main():
             if got is not None:
                 out["intervals"][tag] = got
                 break
+
+    # When the next SAA arrives, and how fast the fold loses its sample.
+    recur = []
+    for day_ in days:
+        exits_, _ = saa_exits(day_)
+        from astropy.io import fits
+        pp = glob.glob(os.path.join(DAILY, day_, "glg_poshist_all_*.fit"))
+        if exits_ is None or not pp:
+            continue
+        with fits.open(pp[0]) as handle:
+            dd = handle[1].data
+            met = np.asarray(dd["SCLK_UTC"], dtype=float)
+            fl = ((np.asarray(dd["FLAGS"]).astype(np.uint16) >> 1) & 1)
+        ent = met[1:][np.diff(fl.astype(np.int8)) == 1]
+        for b in exits_:
+            nxt = ent[ent > b]
+            recur.append(float((nxt[0] - b) / 60.0) if nxt.size else 1e9)
+    if recur:
+        arr = np.array(recur)
+        finite = arr[arr < 1e8]
+        out["recur"] = {
+            "n": int(arr.size),
+            "median": round(float(np.median(finite)), 1),
+            "min": round(float(finite.min()), 1),
+            "survive": [[v, int((arr > v).sum())] for v in (30, 60, 70, 75, 80, 85, 90)],
+        }
 
     # How the excess just after an exit depends on time spent inside.
     pairs = []
