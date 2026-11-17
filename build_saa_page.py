@@ -8,6 +8,7 @@ answering a different question, and it fits in about a tenth of a megabyte.
 Input:  site/saa_profiles.json   (extract_saa.py)
 Output: site/saa.html
 """
+import base64
 import datetime
 import json
 import os
@@ -24,6 +25,18 @@ CLEAN_MAX = 70.0        # must match extract_saa.py
 
 NAI = [f"n{d}" for d in "0123456789ab"]
 BGO = ["b0", "b1"]
+
+
+FIGDIR = "site/figures"
+
+
+def data_uri(name):
+    """Embed a PNG so the page stays self-contained."""
+    path = os.path.join(FIGDIR, name)
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as handle:
+        return "data:image/png;base64," + base64.b64encode(handle.read()).decode("ascii")
 
 
 def path_from(xs, ys, px, py):
@@ -461,6 +474,40 @@ def main():
     recur_min = rec.get('min', 0)
     surv = dict(rec.get('survive') or [])
     surv80, surv90 = surv.get(80, 0), surv.get(90, 0)
+    # Orbit maps. These are cartopy PNGs rather than hand-written SVG,
+    # because they want real coastlines; they carry a white plate in both
+    # themes, as printed maps do.
+    FIGS = [
+        ("orbit_explained.png",
+         "Fermi's orbit and the SAA",
+         "A: the anomaly as Fermi's own flag defines it, over 21 days, with one "
+         "complete orbit for scale. B: five consecutive orbits, each track "
+         "23.8&deg; west of the last, so the crossings march across the zone and "
+         "shorten. C: the same day as a timeline."),
+        ("orbit_all_zoom.png",
+         "Every orbit of one day over the anomaly",
+         "All fifteen. Thick segments are the crossings, each in its own orbit's "
+         "colour so that ten overlapping passes stay separable; dashed tracks "
+         "miss the zone entirely. The numbered ladder stepping down and left is "
+         "the westward march."),
+        ("orbit_all_small.png",
+         "The same day, one orbit per panel",
+         "Same axes throughout. Orbits 1&ndash;6 sweep the zone with each "
+         "crossing shorter than the last, 7&ndash;11 miss it completely, then "
+         "12 grazes the tip and the sequence builds back up. Ten panels show a "
+         "crossing rather than nine because one straddles an orbit boundary."),
+    ]
+    parts = []
+    for name, title, cap in FIGS:
+        uri = data_uri(name)
+        if not uri:
+            continue
+        parts.append(
+            f'<div class="card"><div class="plate">'
+            f'<img loading="lazy" src="{uri}" alt="{title}" /></div>'
+            f'<p class="cap">{cap}</p></div>')
+    orbit_figs = "".join(parts)
+
     built = datetime.date.today().isoformat()
     html = f"""<title>SAA Background in Fermi GBM</title>
 <style>
@@ -514,6 +561,9 @@ def main():
   svg.fig .bandlab {{ font-family:var(--sans); font-size:9px;
     fill:var(--hot); }}
   .pair {{ display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }}
+  /* Maps keep a white ground in both themes, as printed maps do. */
+  .plate {{ background:#ffffff; border-radius:8px; padding:.4rem; }}
+  .plate img {{ width:100%; height:auto; display:block; }}
   @media (max-width:760px) {{ .pair {{ grid-template-columns:1fr; }} }}
   .cap {{ font-size:.78rem; color:var(--muted); font-family:var(--sans);
     margin:.5rem 0 0; max-width:86ch; }}
@@ -610,6 +660,13 @@ def main():
   <div class="tile"><span class="v">{fit['b0']['tau']:.0f} min</span>
     <span class="k">BGO decay constant, b0</span></div>
 </div>
+
+<h2>Why it comes and goes</h2>
+<p>The anomaly is a fixed patch of the Earth; Fermi is a spacecraft in a low,
+  shallow orbit. Everything about the pattern of passages &mdash; how many a
+  day, why they arrive in runs, why a gap of ten hours follows &mdash; falls
+  out of those two facts.</p>
+{orbit_figs}
 
 <h2>One day, as it happens</h2>
 <div class="card">
